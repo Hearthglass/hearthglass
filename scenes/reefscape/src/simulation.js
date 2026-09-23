@@ -3,7 +3,7 @@ import { randomGenerator, clamp, groundHeight, limitVector } from './math.js';
 import { currentAt } from './water.js';
 import { supportHeight } from './terrain.js';
 import { HOST, ROCKS, STATIONS, TANK, CORAL_BOUNDS, THICKETS, PROMONTORY } from './layout.js';
-import { reefNavigation, clearSegment, clearWater } from './navigation.js';
+import { reefNavigation, clearSegment, clearWater, SWIM_BOUNDS } from './navigation.js';
 
 const V=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
 export const FIXED_STEP=1/60;
@@ -11,7 +11,14 @@ export const FIXED_STEP=1/60;
 // is 3.4 — and a captive lyretail harem is one terminal male to four to six females. Nine
 // chromis is also a keeper's number: below seven a pod concentrates its aggression on one
 // fish and eats itself down to a single survivor.
+// A curious fish only notices a cursor this close (units of 10 cm).
+export const CURIOUS_RANGE=4;
 export const POPULATION={clownfish:3,chromis:9,anthias:7,shrimp:2};
+// Tank sizes the host offers. The clownfish are a fixed queue on the one anemone and the
+// shrimp hold the two cleaning stations, so only the two shoals grow; Crowded is about two
+// and a half times Normal. Fish added by hand come on top, up to ADD_LIMIT.
+export const POPULATIONS={few:{chromis:5,anthias:4},normal:{chromis:9,anthias:7},lots:{chromis:15,anthias:12},crowded:{chromis:22,anthias:18}};
+export const ADD_LIMIT=20;
 const REEF_BOUNDS=[...ROCKS,...CORAL_BOUNDS];
 // Where the two Acropora thickets sit in that list. A chromis does not merely hover near
 // its colony, it lives in it — juveniles barely leave the branches and the whole pod drops
@@ -115,9 +122,11 @@ export function seatShrimp(x,z,yaw){
 }
 
 export class ReefSimulation {
-  constructor(seed=36719) {
+  constructor(seed=36719,population='normal') {
+    const shoal=POPULATIONS[population]||POPULATIONS.normal;
     this.random=randomGenerator(seed);this.time=0;this.fish=[];this.food=Array.from({length:32},()=>({active:false,position:V(),velocity:V(),age:0,size:0}));
     this.lastFeed=-10;this.consumed=0;this.steps=0;
+    this.mode='shy';this.pointerStillTime=0;this._curiousGoal=V();this.currentBox=null;this.camera=null;this._tempProj=V();this.playMode=false;this.isHerding=false;
     this._flow=V();this._delta=V();this._desired=V();this._force=V();this._sep=V();this._cohesion=V();this._align=V();this._relative=V();this._heading=V();this.navigation=reefNavigation();
     this.shoals=SHOALS.map((s,i)=>({...s,home:V(...s.home),centre:V(...s.home),velocity:V(),swell:1,out:V(),path:[],sector:i===0?2:i===1?0:1,direction:i===1?-1:1,legs:1}));
     // Buston & Cant measured 177 adjacent-rank pairs on wild percula: a dominant ends up
@@ -125,10 +134,11 @@ export class ReefSimulation {
     // These three sizes are that ladder, so the group reads as a queue rather than a trio.
     const initial=[[-5.15,4.18,2.1],[-2.78,3.99,1.85],[-3.54,3.85,2.35]];
     for(let i=0;i<3;i++)this.add('clown',initial[i],[.84,.66,.48][i],i);
-    for(let i=0;i<9;i++)this.add('chromis',null,.63+(i?this.random()*.13:.15),i,i%2);
+    for(let i=0;i<shoal.chromis;i++)this.add('chromis',null,.63+(i?this.random()*.13:.15),i,i%2);
     // Rank 0 is the terminal male. FishBase puts the male at 15 cm against 7 cm for the
     // female, and an aquarium harem at about 12.5 cm to 9; he is half again their length.
-    for(let i=0;i<7;i++)this.add('anthias',null,(i?.66:1.00)+this.random()*.09,i,2);
+    for(let i=0;i<shoal.anthias;i++)this.add('anthias',null,(i?.66:1.00)+this.random()*.09,i,2);
+    this.limit=this.fish.length+ADD_LIMIT;
     this.previous=this.fish.map(()=>({p:V(),v:V(),alarm:0}));
     // The shrimp draw from their own stream. Sharing the fish's made every tuning of a walk
     // bout shift nineteen fish trajectories with it, which is a trap rather than a coupling.
@@ -139,13 +149,26 @@ export class ReefSimulation {
   add(kind,position,size,rank,shoal=-1) {
     const r=this.random;
     const f={kind,rank,size,shoal,station:V(r()*2-1,r()*2-1,r()*2-1),position:V(),velocity:V(kind==='clown'?.11:-.28,0,.02),goal:V(),goalTimer:0,phase:r()*6.28,yaw:kind==='clown'?0:Math.PI,pitch:0,bank:0,roll:0,bend:0,turning:0,
-      speed:.1,wave:0,tailAmplitude:0,tailHz:0,steer:V(),route:[],routeTimer:0,cruise:.92+r()*.16,beat:false,bout:r(),pectoral:r()*6.28,rowing:1,alarm:0,shelterAccess:0,spook:0,state:'forage',hold:0,show:6+r()*9,display:0,roam:0,follow:null};
+      speed:.1,wave:0,tailAmplitude:0,tailHz:0,steer:V(),route:[],routeTimer:0,cruise:.92+r()*.16,beat:false,bout:r(),pectoral:r()*6.28,rowing:1,alarm:0,shelterAccess:0,spook:0,state:'forage',hold:0,show:6+r()*9,display:0,roam:0,follow:null,highlight:0,wasSelected:false};
     if(position)f.position.set(...position);else{
       this.station(f,f.position);
       // Spawn in water, not inside a thicket followed by a visible first-frame push-out.
       for(let attempt=0;attempt<24&&!clearWater(f.position,.40);attempt++)f.position.lerp(this.shoals[shoal].centre,.22);
     }
     f.goal.copy(f.position);this.fish.push(f);return f;
+  }
+  // One more chromis or anthias, even odds, swimming in from a side of the tank to its shoal.
+  // Null once ADD_LIMIT have been added. A side with rock at the edge falls back to the
+  // shoal's own water, as a new fish at construction does.
+  addFish(){
+    if(this.fish.length>=this.limit)return null;
+    const r=this.random,kind=r()<.5?'chromis':'anthias',shoal=kind==='anthias'?2:r()<.5?0:1,rank=this.fish.filter(f=>f.kind===kind).length;
+    const f=this.add(kind,null,(kind==='chromis'?.63+r()*.13:.66+r()*.09),rank,shoal),side=r()<.5?-1:1;
+    this._delta.set(side*(SWIM_BOUNDS.x[1]-.3),f.position.y,f.position.z);
+    if(clearWater(this._delta,.40)){f.position.copy(this._delta);f.goal.copy(f.position);}
+    f.yaw=side<0?0:Math.PI;f.velocity.set(-side*.5,0,0);f.speed=.5;
+    this.previous.push({p:V(),v:V(),alarm:0});
+    return f;
   }
   // Where this animal's slot in its shoal currently sits. Popper & Fishelson found the
   // territorial male anthias holding the water right against the rock with the females and
@@ -180,6 +203,50 @@ export class ReefSimulation {
       pellet.velocity.set(0,-.04,0);count++;
     }
     if(count)this.lastFeed=this.time;return count;
+  }
+  // Counted on request by the host; nothing is allocated in step().
+  get selectedFish(){const out=[];this.fish.forEach((f,i)=>{if(f.highlight>.05)out.push(i);});return out;}
+  setMode(mode) {
+    this.mode=mode==='curious'?'curious':'shy';
+  }
+  setSelection(box, camera) {
+    if (box === 'clear') {
+      this.currentBox = null;
+      for (const f of this.fish) {
+        f.highlight = 0;
+        f.wasSelected = false;
+      }
+      return;
+    }
+    this.currentBox = box;
+    if (camera) this.camera = camera;
+  }
+  setPlayMode(active) {
+    this.playMode = Boolean(active);
+    if (!this.playMode) {
+      this.isHerding = false;
+      for (const f of this.fish) {
+        f.highlight = 0;
+        f.wasSelected = false;
+      }
+    }
+  }
+  setHerd(state) {
+    const next = typeof state === 'object' && state !== null ? Boolean(state.active) : Boolean(state);
+    if (this.isHerding && !next) {
+      for (const f of this.fish) {
+        if (f.highlight > 0) {
+          f.yaw += (this.random() - .5) * Math.PI * .8;
+          f.velocity.x += (this.random() - .5) * 2.8;
+          f.velocity.z += (this.random() - .5) * 2.8;
+          f.tailAmplitude = .85;
+          f.speed = Math.max(f.speed, 1.4);
+          f.highlight = 0;
+          f.wasSelected = false;
+        }
+      }
+    }
+    this.isHerding = next;
   }
   chooseGoal(f) {
     const r=this.random;
@@ -278,6 +345,45 @@ export class ReefSimulation {
   step(dt=FIXED_STEP,pointer=null) {
     if(!Number.isFinite(dt)||dt<=0||dt>.101)throw new RangeError('Simulation step must be 0 < dt <= 0.101 seconds.');
     this.time+=dt;this.steps++;
+    if(pointer){
+      const speed=pointer.speed||0;
+      if(speed<.15)this.pointerStillTime=(this.pointerStillTime||0)+dt;
+      else this.pointerStillTime=Math.max(0,(this.pointerStillTime||0)-dt*2);
+    }else{
+      this.pointerStillTime=0;
+    }
+    if(this.currentBox&&this.camera){
+      const minX=Math.min(this.currentBox.x0,this.currentBox.x1),maxX=Math.max(this.currentBox.x0,this.currentBox.x1);
+      const minY=Math.min(this.currentBox.y0,this.currentBox.y1),maxY=Math.max(this.currentBox.y0,this.currentBox.y1);
+      const w=typeof window!=='undefined'?window.innerWidth:1920,h=typeof window!=='undefined'?window.innerHeight:1080;
+      for(const f of this.fish){
+        this._tempProj.copy(f.position).project(this.camera);
+        if(this._tempProj.z>=-1&&this._tempProj.z<=1){
+          const sx=(this._tempProj.x*.5+.5)*w,sy=(-this._tempProj.y*.5+.5)*h;
+          if(sx>=minX&&sx<=maxX&&sy>=minY&&sy<=maxY){
+            f.highlight=1.0;
+            if(!f.wasSelected){
+              f.wasSelected=true;
+              f.yaw+=(this.random()-.5)*.6;
+              f.tailAmplitude=Math.max(f.tailAmplitude,.4);
+            }
+          }else if(!f.wasSelected){
+            f.highlight=Math.max(0,(f.highlight||0)-dt/.5);
+          }
+        }else if(!f.wasSelected){
+          f.highlight=Math.max(0,(f.highlight||0)-dt/.5);
+        }
+      }
+    }else{
+      for(const f of this.fish){
+        f.wasSelected=false;
+        if(this.playMode&&f.highlight>.05&&!this.isHerding){
+          f.highlight=1.0;
+        }else if(f.highlight>0){
+          f.highlight=Math.max(0,f.highlight-dt/3.0);
+        }
+      }
+    }
     const t=this.time;
     for(const p of this.food)if(p.active){
       p.age+=dt;if(p.age>36){p.active=false;continue;}
@@ -354,11 +460,43 @@ export class ReefSimulation {
           const d=p.distanceToSquared(item.position);if(d<nearest){nearest=d;food=item;goal=item.position;}
         }
         if(food)f.state='feed';
+        else if(this.isHerding&&f.highlight>0&&pointer){
+          const angle=(index*137.5*Math.PI)/180;
+          const radius=0.35+0.15*(index%5);
+          const tx=pointer.position.x+Math.cos(angle)*radius;
+          const ty=Math.max(0.6,pointer.position.y-0.2-0.1*(index%4));
+          const tz=pointer.position.z+Math.sin(angle)*radius;
+          this._curiousGoal.set(tx,ty,tz);
+          goal=this._curiousGoal;
+          f.state='herd';
+        }else if(this.mode==='curious'&&pointer&&f.hold<=0){
+          const reach=p.distanceToSquared(pointer.position)<CURIOUS_RANGE*CURIOUS_RANGE;
+          const interest=!reach?0:this.pointerStillTime<8?1:Math.max(0,1-(this.pointerStillTime-8)/3);
+          if(interest>0){
+            const angle=(index*137.5*Math.PI)/180;
+            const radius=0.65+0.3*(index%5);
+            const tx=pointer.position.x+Math.cos(angle)*radius;
+            const ty=Math.max(0.6,pointer.position.y-0.25-0.15*(index%4));
+            const tz=pointer.position.z+Math.sin(angle)*radius;
+            if(f.kind==='clown'){
+              const hx=tx-HOST.x,hy=ty-HOST.y,hz=tz-HOST.z;
+              if(hx*hx+hy*hy+hz*hz<6.0){
+                this._curiousGoal.set(tx,ty,tz);
+                goal=this._curiousGoal;
+                f.state='curious';
+              }
+            }else{
+              this._curiousGoal.set(tx,ty,tz);
+              goal=this._curiousGoal;
+              f.state='curious';
+            }
+          }
+        }
       }
       // A fish being cleaned, or one wallowing in the tentacles, is barely swimming.
-      if(f.kind!=='clown'&&f.alarm<=0)goal=this.travelGoal(f,goal,dt);
-      const topSpeed=(f.kind==='clown'?.59:f.kind==='anthias'?.98:1.10)*f.cruise*(f.alarm>0?1.65:f.display>0?1.5:food?1.3:f.hold&&p.distanceToSquared(f.goal)<.5?.16:1);
+      if(f.kind!=='clown'&&f.alarm<=0&&f.state!=='herd')goal=this.travelGoal(f,goal,dt);
       this._delta.subVectors(goal,p);const dist=this._delta.length();
+      const topSpeed=(f.kind==='clown'?.59:f.kind==='anthias'?.98:1.10)*f.cruise*(f.alarm>0?1.65:f.display>0?1.5:food?1.3:f.state==='herd'?1.9:f.state==='curious'&&dist<.4?.38:f.hold&&p.distanceToSquared(f.goal)<.5?.16:1);
       this._force.copy(this._delta).multiplyScalar(dist>1e-5?Math.min(topSpeed,dist*.68)/dist:0);
       this._force.sub(this._flow); // swim velocity relative to the moving water
       this._sep.set(0,0,0);this._cohesion.set(0,0,0);this._align.set(0,0,0);let neighbors=0;

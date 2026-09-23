@@ -107,7 +107,13 @@ export function foliageMaterial() {
       vec3 dp1=dFdx(-vViewPosition),dp2=dFdy(-vViewPosition);
       vec3 r1=cross(dp2,normal),r2=cross(normal,dp1);
       float det=dot(dp1,r1);
-      normal=normalize(abs(det)*normal-sign(det)*(dFdx(surfaceHeight)*r1+dFdy(surfaceHeight)*r2));
+      // On a needle tip narrower than a pixel, or a blade seen edge-on, det is zero and the
+      // bumped vector with it; normalising that is NaN, which shades the pixel black or blown
+      // white and flickers as the plant sways. There the surface detail is invisible anyway,
+      // so the smooth normal is kept.
+      vec3 bumped=abs(det)*normal-sign(det)*(dFdx(surfaceHeight)*r1+dFdy(surfaceHeight)*r2);
+      float bumpedLength=length(bumped);
+      if(bumpedLength>1e-30)normal=bumped/bumpedLength;
     `,
     );
     waterLitShader(shader, {

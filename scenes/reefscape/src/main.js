@@ -8,7 +8,7 @@ import { createAnemone } from './anemone.js';
 import { createFishSchool } from './fish-model.js';
 import { createShrimp } from './shrimp.js';
 import { createParticles } from './particles.js';
-import { ReefSimulation, FIXED_STEP } from './simulation.js';
+import { ReefSimulation, FIXED_STEP, POPULATIONS } from './simulation.js';
 import { views } from './views.js';
 import { createFrameLoop } from '../../shared/frame-loop.js';
 import { waterTime, LAMP, LAMP_RANGE } from './water.js';
@@ -20,13 +20,22 @@ if(capture)document.body.classList.add('clean','capture');
 let quality=preferredQuality(params);
 let hostRate=isHost?0:60,onBattery=false,contextLost=false,disposed=false;
 let paused=capture||(!isHost&&matchMedia('(prefers-reduced-motion: reduce)').matches);
-let changeRate=()=>{},changePower=()=>{},feed=()=>{};
+let changeRate=()=>{},changePower=()=>{},feed=()=>{},changeMode=()=>{},changeSelection=()=>{},changePlayMode=()=>{},changeHerd=()=>{},currentMode='shy';
 // Installed before WebGL startup so host rate 0 cannot be lost during initialization.
 window.habitatRate=fps=>{if(!Number.isFinite(fps))return;const next=Math.max(0,Math.min(60,fps));if(next===hostRate)return;hostRate=next;changeRate();};
 window.habitatFeed=()=>feed();
 window.habitatPause=value=>{paused=Boolean(value);changeRate();};
 // The Mac host knows the power source; a browser only sometimes does (see getBattery below).
 window.habitatPower=battery=>{const next=Boolean(battery);if(next===onBattery)return;onBattery=next;changePower();};
+window.habitatMode=mode=>{currentMode=mode==='curious'?'curious':'shy';changeMode(currentMode);};
+window.habitatSelect=box=>changeSelection(box);
+window.habitatPlayMode=active=>changePlayMode(active);
+window.habitatHerd=state=>changeHerd(state);
+// The tank is stocked when the scene is built, so a different size is a reload with the level
+// in the URL; the wallpaper host puts it there itself.
+const population=Object.hasOwn(POPULATIONS,params.get('population'))?params.get('population'):'normal';
+window.habitatPopulation=level=>{if(!Object.hasOwn(POPULATIONS,level)||level===population)return;const url=new URL(location.href);url.searchParams.set('population',level);location.replace(url);};
+let addFish=()=>false;window.habitatAddFish=()=>addFish();
 
 
 
@@ -89,7 +98,12 @@ async function start(){
   // then fail the depth test without sampling the triplanar texture layers.
   const rockDepthMaterial=new THREE.MeshBasicMaterial({colorWrite:false});
   rockPrepass.add(new THREE.Mesh(rockSurface.geometry,rockDepthMaterial));
-  const simulation=new ReefSimulation();
+  const simulation=new ReefSimulation(undefined,population);
+  changeMode=mode=>simulation.setMode(mode);simulation.setMode(currentMode);
+  changeSelection=box=>simulation.setSelection(box,camera);
+  changePlayMode=active=>simulation.setPlayMode(active);
+  changeHerd=state=>simulation.setHerd(state);
+  Object.defineProperty(window,'habitatSelectedCount',{get:()=>simulation?simulation.selectedFish.length:0,configurable:true});
   const fishSchool=createFishSchool(scene,simulation);
   const shrimp=createShrimp(scene,simulation),particles=createParticles(scene,simulation,shadow);
   function sync(dt){
@@ -177,6 +191,7 @@ async function start(){
   canvas.addEventListener('pointerleave',()=>{pointer=null;});
   canvas.addEventListener('pointerdown',event=>{if(event.button!==0||!running()||!project(event))return;simulation.feed(point.x,1);});
   feed=()=>{if(running())simulation.feed(-2.6+Math.sin(simulation.time*.73)*1.7,1.3);};
+  addFish=()=>Boolean(running()&&simulation.addFish());
   updateControls=installControls({habitat,isPaused:()=>paused,isRunning:running,
     pause:window.habitatPause,feed,quality:()=>quality,
     setQuality(value){quality=qualityName(value);autoScale=1;resize();restart();},

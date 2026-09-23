@@ -4,7 +4,7 @@ import { reportSceneError } from './controls.js';
 // Keep the host's latest power/rate commands until the scene installs its callbacks.
 const pendingHostCommands = new Map();
 if (document.documentElement.dataset.motion === 'host') {
-  for (const name of ['habitatPower', 'habitatRate']) {
+  for (const name of ['habitatPower', 'habitatRate', 'habitatMode', 'habitatSelect', 'habitatPopulation', 'habitatPlayMode', 'habitatHerd']) {
     window[name] = value => pendingHostCommands.set(name, value);
   }
 }

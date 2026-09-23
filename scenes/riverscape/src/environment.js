@@ -811,8 +811,10 @@ export async function createEnvironment(scene) {
 // oxygen bubbles pearling off the plants. Both are lit only where the key light reaches
 // them, so they sparkle in the light and vanish in shade.
 export function createParticles(scene, { thickets }) {
-  const debris = 780,
-    bubbles = 120,
+  // At wallpaper size every fleck in the beam is a separate moving pixel, and hundreds of
+  // them over the planting read as static rather than as water; a sparse few read as water.
+  const debris = 260,
+    bubbles = 70,
     count = debris + bubbles;
   const positions = new Float32Array(count * 3),
     seeds = new Float32Array(count),
@@ -869,6 +871,7 @@ export function createParticles(scene, { thickets }) {
       varying float vKind;
       varying float vFade;
       varying float vLight;
+      varying float vCover;
       varying vec2 vGlint;
       ${currentGLSL}
       ${surfaceLightGLSL}
@@ -881,34 +884,54 @@ export function createParticles(scene, { thickets }) {
         vec3 p = position;
         vKind = kind;
         float tumble = 1.0;
+        float grow = 1.0;
         if (kind > 0.5) {
-          // Buoyancy carries a bubble up at a speed set by its size; it wobbles as it rises
-          // and is released again at its origin once it reaches the surface.
+          // A bubble pearls on the leaf first, swelling in place, then lets go. Buoyancy
+          // takes a moment to overcome the water it has to push aside, so it starts slowly
+          // and reaches a terminal speed set by its size, wobbling more once it is moving.
+          // It is released again at its origin once it reaches the surface.
           float speed = 1.2 + size * 30.0;
           float travel = ${SURFACE_Y.toFixed(1)} - position.y;
-          float period = travel / speed + 2.0 + seed * 9.0;
+          float cling = 1.2 + seed * 2.5;
+          float period = cling + travel / speed + 2.0 + seed * 9.0;
           float age = mod(t + seed * period, period);
-          float risen = age * speed;
+          float free = max(age - cling, 0.0);
+          float risen = speed * (free - 0.45 * (1.0 - exp(-free / 0.45)));
+          float sway = smoothstep(0.0, 0.8, free);
           p.y += min(risen, travel);
-          p.x += sin(age * 6.0 + seed * 20.0) * 0.035;
-          p.z += cos(age * 5.1 + seed * 17.0) * 0.03;
-          vFade = smoothstep(0.0, 0.15, age) * (1.0 - step(travel, risen));
+          p.x += sin(free * 6.0 + seed * 20.0) * 0.035 * sway;
+          p.z += cos(free * 5.1 + seed * 17.0) * 0.03 * sway;
+          grow = 0.35 + 0.65 * smoothstep(0.0, cling, age);
+          vFade = smoothstep(0.0, 0.5, age) * (1.0 - step(travel, risen));
         } else {
           // Neutrally buoyant flecks ride the current, sinking a little, tumbling as they go.
           p += FLOW_DIRECTION * currentTravel(position, t) * ${CURRENT_SPEED.toFixed(3)} * (0.75 + seed * 0.5);
           p.x = mod(p.x + 9.5, 19.0) - 9.5;
           p.z = mod(p.z + 5.6, 9.2) - 5.6;
           p.y = mod(position.y - t * (0.012 + seed * 0.02) - 0.3, 9.4) + 0.3;
-          tumble = 0.35 + 0.65 * abs(sin(t * (1.1 + seed * 2.5) + seed * 40.0));
+          // A fleck turning over catches a little more or less light. Kept gentle and slow:
+          // a fast full-range flicker on points this small reads as noise, not as tumbling.
+          tumble = 0.7 + 0.3 * abs(sin(t * (0.45 + seed * 0.9) + seed * 40.0));
           vFade = smoothstep(9.5, 8.6, abs(p.x)) * smoothstep(0.3, 0.9, p.y) * (0.45 + 0.55 * fract(seed * 7.31));
         }
         float lit = 1.0;
         #if NUM_DIR_LIGHT_SHADOWS > 0
+          // Leaf shadows are finely cut, the leaves sway, and the shadow map is only redrawn
+          // now and then. A single lit-or-not test flips a drifting fleck on and off from one
+          // frame to the next along every leaf edge, which reads as static. Five taps a
+          // texel and a half apart give a partial answer at an edge instead, eased so the
+          // penumbra stays narrow.
           vec4 shadowCoord = directionalShadowMatrix[0] * vec4(p, 1.0);
           shadowCoord.xyz /= shadowCoord.w;
           if (all(greaterThan(shadowCoord.xy, vec2(0.0))) && all(lessThan(shadowCoord.xy, vec2(1.0)))) {
-            float occluder = unpackRGBAToDepth(texture2D(directionalShadowMap[0], shadowCoord.xy));
-            lit = shadowCoord.z - 0.0015 <= occluder ? 1.0 : 0.0;
+            vec2 texel = 1.5 / vec2(textureSize(directionalShadowMap[0], 0));
+            float depth = shadowCoord.z - 0.0015, sum = 0.0;
+            sum += step(depth, unpackRGBAToDepth(texture2D(directionalShadowMap[0], shadowCoord.xy)));
+            sum += step(depth, unpackRGBAToDepth(texture2D(directionalShadowMap[0], shadowCoord.xy + vec2(texel.x, 0.0))));
+            sum += step(depth, unpackRGBAToDepth(texture2D(directionalShadowMap[0], shadowCoord.xy - vec2(texel.x, 0.0))));
+            sum += step(depth, unpackRGBAToDepth(texture2D(directionalShadowMap[0], shadowCoord.xy + vec2(0.0, texel.y))));
+            sum += step(depth, unpackRGBAToDepth(texture2D(directionalShadowMap[0], shadowCoord.xy - vec2(0.0, texel.y))));
+            lit = smoothstep(0.1, 0.9, sum / 5.0);
           }
         #endif
         vec3 water = waterLight(p, t) * waterLightDrift(p, t);
@@ -916,7 +939,12 @@ export function createParticles(scene, { thickets }) {
         vGlint = vec2(-0.16, 0.2);
         vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = max(1.3, size * pixelScale / -mvPosition.z);
+        // Without antialiasing a point under two pixels jumps between pixels as it drifts
+        // and twinkles. Such a point is drawn at two pixels and made fainter instead, by
+        // the share of that area it really covers.
+        float pixels = size * grow * pixelScale / -mvPosition.z;
+        gl_PointSize = max(2.0, pixels);
+        vCover = min(1.0, pixels * pixels / 4.0);
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */ `
@@ -925,6 +953,7 @@ export function createParticles(scene, { thickets }) {
       varying float vKind;
       varying float vFade;
       varying float vLight;
+      varying float vCover;
       varying vec2 vGlint;
       void main() {
         vec2 c = gl_PointCoord - 0.5;
@@ -936,13 +965,13 @@ export function createParticles(scene, { thickets }) {
           // An air sphere: light refracts around a dark rim, and a bright glint faces the lamp.
           float rim = smoothstep(0.5, 1.0, r);
           float glint = exp(-dot(c - vGlint, c - vGlint) * 55.0);
-          color = mix(vec3(0.22, 0.27, 0.22), vec3(0.02, 0.03, 0.02), rim) * (0.4 + 0.6 * vLight) + glint * 3.2 * vLight;
-          alpha = (0.3 + 0.6 * rim) * vFade;
+          color = mix(vec3(0.22, 0.27, 0.22), vec3(0.02, 0.03, 0.02), rim) * (0.4 + 0.6 * vLight) + glint * 1.8 * vLight;
+          alpha = (0.3 + 0.6 * rim) * vFade * vCover;
         } else {
           // A matte fleck: bright in the beam, invisible in shade; some are darker plant
           // fragments, some pale mulm.
-          color = vec3(0.62, 0.64, 0.5) * vLight * (1.2 + 2.4 * vFade);
-          alpha = (1.0 - smoothstep(0.15, 1.0, r)) * vFade * 0.72;
+          color = vec3(0.62, 0.64, 0.5) * vLight * (0.5 + 0.7 * vFade);
+          alpha = (1.0 - smoothstep(0.15, 1.0, r)) * vFade * vCover * 0.5;
         }
         gl_FragColor = vec4(color, alpha);
         #include <fog_fragment>

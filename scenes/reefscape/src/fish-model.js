@@ -326,7 +326,7 @@ function fishMaterial(kind) {
   const stroke=kind==='clown'?[.050,.034]:kind==='chromis'?[.024,.010]:[.030,.014];
   return underwater(new THREE.MeshStandardMaterial({roughness:.38,metalness:.02,side:THREE.DoubleSide,transparent:true,forceSinglePass:true}),{
     key:`fish-${kind}`,transmission:.085,
-    vertex:`attribute float part;attribute vec4 aFishTrim;attribute vec4 aFishGait;varying float vPart;varying vec3 vAnatomy;varying vec2 vSkinUv;varying vec2 vTrim;
+    vertex:`attribute float part;attribute vec4 aFishTrim;attribute vec4 aFishGait;varying float vPart;varying vec3 vAnatomy;varying vec2 vSkinUv;varying vec2 vTrim;varying float vHighlight;
       #define fishTrim aFishTrim
       #define fishGait aFishGait
       // The propulsive wave grows toward the tail, and a turn bends the whole body the same
@@ -334,7 +334,7 @@ function fishMaterial(kind) {
       float fishFlex(float x) {float q=clamp((.30-x)/1.14,0.,1.);return (sin(fishTrim.x-q*3.7)*fishTrim.y+fishGait.z)*q*q;}
       float fishSlope(float x){float q=clamp((.30-x)/1.14,0.,1.);return -(2.*q*(fishTrim.y*sin(fishTrim.x-q*3.7)+fishGait.z)-3.7*q*q*fishTrim.y*cos(fishTrim.x-q*3.7))/1.14;}`,
     normal:`objectNormal=normalize(vec3(normal.x-fishSlope(position.x)*normal.z,normal.y,normal.z));`,
-    begin:`vPart=part;vAnatomy=position;vSkinUv=uv;vTrim=fishTrim.zw;
+    begin:`vPart=part;vAnatomy=position;vSkinUv=uv;vTrim=fishTrim.zw;vHighlight=fishGait.w;
       transformed.z+=fishFlex(position.x);
       // A pectoral rows through an abduction–adduction cycle rather than flapping: the
       // blade sweeps out and then back along the flank, so the stroke has a fore-aft part.
@@ -350,7 +350,7 @@ function fishMaterial(kind) {
         if(position.x<${n(axis(kind,1))}){float lobe=uv.y*uv.y*smoothstep(.12,.24,abs(position.y));transformed.x-=fishTrim.w*.12*lobe;transformed.y+=sign(position.y)*fishTrim.w*.035*lobe;}
         else if(position.y>.10){float spine=uv.y*uv.y*exp(-pow((uv.x-.150)/.034,2.));transformed.y+=(.045+.11*fishTrim.w)*spine;transformed.x-=.05*fishTrim.w*spine;}
       }`:''}`,
-    fragment:`varying float vPart;varying vec3 vAnatomy;varying vec2 vSkinUv;varying vec2 vTrim;`,
+    fragment:`varying float vPart;varying vec3 vAnatomy;varying vec2 vSkinUv;varying vec2 vTrim;varying float vHighlight;`,
     color:`
       float u=vSkinUv.x,band=vSkinUv.y,span=clamp(vSkinUv.y,0.,1.),scaleEdge=0.;
       if(vPart<.5){
@@ -421,6 +421,10 @@ function fishMaterial(kind) {
         // fish has.
         roughnessFactor=.88;
       }
+      if(vHighlight>0.0){
+        float hFresnel=pow(1.-abs(dot(normal,normalize(vViewPosition))),2.5);
+        diffuseColor.rgb+=vec3(.15,.50,.65)*(vHighlight*hFresnel*1.8+vHighlight*.15);
+      }
     `,
   });
 }
@@ -430,28 +434,39 @@ function fishMaterial(kind) {
  */
 export function createFishSchool(scene,simulation){
   const groups=[];
+  // Each species' buffers hold every fish it could have after additions (simulation.limit),
+  // so adding one only raises mesh.count.
+  const capacity=simulation.limit||simulation.fish.length;
   for(const kind of ['clown','chromis','anthias']){
-    const fish=simulation.fish.filter(f=>f.kind===kind),geometry=makeFishGeometry(kind);
-    const data=new Float32Array(fish.length*4),attribute=new THREE.InstancedBufferAttribute(data,4).setUsage(THREE.DynamicDrawUsage);
-    const gait=new Float32Array(fish.length*4),gaitAttribute=new THREE.InstancedBufferAttribute(gait,4).setUsage(THREE.DynamicDrawUsage);
+    const fish=simulation.fish.filter(f=>f.kind===kind),geometry=makeFishGeometry(kind),room=kind==='clown'?fish.length:capacity;
+    const data=new Float32Array(room*4),attribute=new THREE.InstancedBufferAttribute(data,4).setUsage(THREE.DynamicDrawUsage);
+    const gait=new Float32Array(room*4),gaitAttribute=new THREE.InstancedBufferAttribute(gait,4).setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute('aFishTrim',attribute);geometry.setAttribute('aFishGait',gaitAttribute);
-    const mesh=new THREE.InstancedMesh(geometry,fishMaterial(kind),fish.length);mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(mesh); // tiny fixed population, shader-deformed bounds
+    const mesh=new THREE.InstancedMesh(geometry,fishMaterial(kind),room);mesh.count=fish.length;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(mesh); // small population, shader-deformed bounds
     // Trim z shades each animal a little differently — for the clownfish it instead
     // carries relative size, because percula's black borders broaden with age and the
     // biggest fish on an anemone is the blackest. Trim w marks the sexed-up individual:
     // the terminal male anthias, and the chromis holding the nest.
     const largest=Math.max(...fish.map(f=>f.size));
-    groups.push({fish,data,attribute,gait,gaitAttribute,mesh,trim:fish.map((f,i)=>[kind==='clown'?f.size/largest:(i*.6180339887+.31)%1,(kind==='anthias'||kind==='chromis')&&f.rank===0?1:0])});
+    const trim=(f,i)=>[kind==='clown'?f.size/largest:(i*.6180339887+.31)%1,(kind==='anthias'||kind==='chromis')&&f.rank===0?1:0];
+    groups.push({kind,fish,data,attribute,gait,gaitAttribute,mesh,trim:fish.map(trim),trimOf:trim});
   }
   const dummy=new THREE.Object3D(),euler=new THREE.Euler(0,0,0,'YZX');
+  let known=simulation.fish.length;
   return {update(){
+    // A fish added since the last frame joins its species' mesh.
+    if(simulation.fish.length!==known){
+      for(let k=known;k<simulation.fish.length;k++){const f=simulation.fish[k],group=groups.find(g=>g.kind===f.kind);
+        if(group.fish.length>=group.mesh.instanceMatrix.count)continue;group.trim.push(group.trimOf(f,group.fish.length));group.fish.push(f);group.mesh.count=group.fish.length;}
+      known=simulation.fish.length;
+    }
     for(const group of groups){
       for(let i=0;i<group.fish.length;i++){
         const f=group.fish[i];dummy.position.copy(f.position);dummy.scale.setScalar(f.size);euler.set(f.roll,f.yaw,f.pitch);dummy.quaternion.setFromEuler(euler);dummy.updateMatrix();group.mesh.setMatrixAt(i,dummy.matrix);
         // The simulation owns effort and amplitude. No hidden idle oscillation here;
         // a coast is straight. The travelling wave runs from the head toward the tail.
         group.data.set([f.phase,f.tailAmplitude,...group.trim[i]],i*4);
-        group.gait.set([f.pectoral,f.rowing,f.bend,0],i*4);
+        group.gait.set([f.pectoral,f.rowing,f.bend,f.highlight||0],i*4);
       }
       group.attribute.needsUpdate=true;group.gaitAttribute.needsUpdate=true;group.mesh.instanceMatrix.needsUpdate=true;
     }

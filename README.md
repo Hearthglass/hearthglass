@@ -28,24 +28,58 @@ The script builds the app for your Mac, installs it at `~/Applications/Desktop H
 
 During installation, macOS may ask whether Terminal can control System Events. This lets the installer set a still image of the aquarium as your desktop picture, underneath the animation. You can decline; the live wallpaper will still work.
 
-You don't need Node.js for the wallpaper. If you already have it, `npm run wallpaper` runs the same installer.
+## Install on Windows
+
+You need Windows 10 or Windows 11 and the [.NET 8 SDK](https://dotnet.microsoft.com/download) (or run with pre-installed .NET 8 Desktop Runtime).
+
+### Quick Install (Double-Click)
+Simply **double-click [`Install.cmd`](Install.cmd)** in the project folder.
+
+### Command Line
+Or run in PowerShell / Terminal:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File wallpaper/install.ps1
+```
+
+Or with npm:
+
+```sh
+npm run wallpaper:win
+```
+
+The script builds Desktop Habitats, installs it to `%LOCALAPPDATA%\Programs\DesktopHabitats`, adds a shortcut to your Start Menu and Startup folder, and starts the aquarium immediately.
+
+### Uninstall
+- **Double-click [`Uninstall.cmd`](Uninstall.cmd)** in the project folder
+- Or open the Windows Start Menu and select **Uninstall Desktop Habitats**
+- Or run `npm run unwallpaper:win` in PowerShell
 
 ## Use the wallpaper
 
-Click the fish icon in the menu bar:
+Click the fish icon in the menu bar (macOS) or system tray (Windows):
 
 - **Environment** switches every screen between Riverscape and Reefscape and remembers your choice.
 - **Feed** drops ten pellets into each screen's tank, or eight in Reefscape. Uneaten pellets dissolve after 20–40 seconds of running simulation time in Riverscape and 36 seconds in Reefscape, measured from when they touch the water.
 - **Pause / Resume** controls the animation. Your choice is remembered across restarts.
 - **Quit** closes the app until you open it again or next sign in.
 
-Move your cursor near the fish to see them react. Desktop icons, clicks and dragging work as usual. To feed the fish, use the menu; clicking the desktop does not drop food.
+On Windows the tray menu also has:
+
+- **Fish behaviour**: **Shy** fish dart away from a fast-moving cursor. **Curious** fish gather around a nearby cursor and lose interest after it sits still for a while; a sudden lunge still startles them.
+- **Population**: Few, Normal, Lots or Crowded. Changing it restocks every tank.
+- **Add a fish** sends one more fish swimming in from the side of the tank under your cursor, up to 20 extra. Added fish last until the population changes or the app restarts.
+- **Click to feed**: a single click on empty desktop drops a pinch of food at that spot. Clicks on icons, double-clicks and quick repeats are ignored.
+- **Select fish by dragging**: fish inside the blue box Windows draws when you drag on the desktop light up and turn to look.
+- **Play mode** (or **Ctrl+Alt+F**): the desktop stops responding to the mouse so you can play with the fish. Drag to select fish, drag again to herd them, right-click to feed, and press Esc or Ctrl+Alt+F to leave. Play mode also ends by itself after a minute without input.
+
+Move your cursor near the fish to see them react. Desktop icons, clicks and dragging work as usual outside play mode.
 
 ## FAQ
 
 ### Does it work on Windows or Linux?
 
-The desktop app supports macOS only. The browser preview needs a browser with WebGL2, but there is no wallpaper installer for Windows or Linux.
+Desktop wallpaper support is available for **macOS and Windows**. Linux users can still enjoy both environments directly in a browser.
 
 ### Will it drain my battery?
 

@@ -20,6 +20,54 @@ const PIVOT=V(-.10,-.15,0);
 // drop simply hangs, as it does on a real shoulder.
 const foot=(j,sign)=>{const [a,y,b]=SHRIMP.feet[j-2];return V(a,y,sign*b);};
 const FEET=[2,3,4].flatMap(j=>[-1,1].map(sign=>foot(j,sign)));
+// The rest shape of antenna j (0 the long flagellum, 1-2 the antennules) at fraction s of
+// its length; the vertex shader bends it from here.
+const antennaPoint=(j,s,sign,out)=>{const len=j===0?1.42:j===1?1.10:.76;return out.set(.25+s*len*(j===2?.66:.95),.23+s*(.66-j*.23)-.26*s*s,sign*(.075+s*(.30+j*.18)));};
+// The antennae are drawn by the shader alone, so nothing stopped them sweeping into the
+// rock or, on a walk up to a rock face, running straight into it. Each frame the shape the
+// shader is about to draw is replayed at points along each antenna and tested against the
+// relief. Each side's antennae are then turned about their base, as a shrimp holds them off
+// the rock: raised for rock ahead, and rolled up off rock beside it (the short antennules
+// splay furthest out), by the least turn that keeps every point ANTENNA_CLEAR above the rock.
+// Turning them keeps their length, where pushing the tips up would stretch them. The water's
+// push is not known here, so its largest downward share is assumed.
+const ANTENNA_BASE=[.25,.23,.075],ANTENNA_SAMPLES=[.1,.25,.5,.75,1],ANTENNA_CLEAR=.01,FLOW_DOWN=.04,LIFT_TAU=.2;
+export const ANTENNA_MAX_RAISE=1.4,ANTENNA_MAX_ROLL=1.2,ANTENNA_TURN_STEP=.1;
+// Roll (about the body's long axis, outward side up), then raise (about the across axis):
+// the same order the shader applies them in.
+function turnAntenna(point,sign,raise,roll){
+  const dy=point.y-ANTENNA_BASE[1],out=(point.z-sign*ANTENNA_BASE[2])*sign,cr=Math.cos(roll),sr=Math.sin(roll);
+  point.y=ANTENNA_BASE[1]+dy*cr+out*sr;point.z=sign*(ANTENNA_BASE[2]-dy*sr+out*cr);
+  const dx=point.x-ANTENNA_BASE[0],dz=point.y-ANTENNA_BASE[1],c=Math.cos(raise),s=Math.sin(raise);
+  point.x=ANTENNA_BASE[0]+dx*c-dz*s;point.y=ANTENNA_BASE[1]+dx*s+dz*c;
+  return point;
+}
+// How far the deepest point of one side's antennae is inside the rock (≤0 when clear).
+export function antennaDepth(shrimp,root,sign,raise,roll,point){
+  const clock=6.2832*shrimp.rhythm,q=(shrimp.rhythm*2)%1,snap=(q<.22?q/.22:1-(q-.22)/.78)*shrimp.flick;
+  let depth=-Infinity;
+  for(let j=0;j<3;j++)for(const t of ANTENNA_SAMPLES){
+    const tip=t*t,sweep=j===0?Math.sin(clock+sign*.9)*shrimp.signal:0,down=j===0?0:snap;
+    turnAntenna(antennaPoint(j,t,sign,point),sign,raise,roll);
+    point.y+=(sweep*.11-down*.11-FLOW_DOWN+shrimp.reach*(.30+.12*Math.sin(clock)))*tip;
+    point.z+=sweep*sign*.09*tip;
+    point.applyQuaternion(root.quaternion).add(root.position);
+    depth=Math.max(depth,supportHeight(point.x,point.z)+ANTENNA_CLEAR-point.y);
+  }
+  return depth;
+}
+// The least turn that clears, the two angles counted together; where none does, the one
+// that leaves the least of the antennae buried. Written into out as [raise, roll].
+export function antennaTurn(shrimp,root,sign,out=[0,0],point=V(0,0,0)){
+  let least=Infinity;out[0]=out[1]=0;
+  const raises=Math.round(ANTENNA_MAX_RAISE/ANTENNA_TURN_STEP),rolls=Math.round(ANTENNA_MAX_ROLL/ANTENNA_TURN_STEP);
+  for(let total=0;total<=raises+rolls;total++)for(let r=Math.max(0,total-rolls);r<=Math.min(total,raises);r++){
+    const raise=r*ANTENNA_TURN_STEP,roll=(total-r)*ANTENNA_TURN_STEP,depth=antennaDepth(shrimp,root,sign,raise,roll,point);
+    if(depth<=0){out[0]=raise;out[1]=roll;return out;}
+    if(depth<least){least=depth;out[0]=raise;out[1]=roll;}
+  }
+  return out;
+}
 // The caridoid escape folds the abdomen under the thorax about the joint behind the
 // carapace until the tail fan meets it — 25 degrees between the two, in Arnott's high-speed
 // frames. Every mesh carrying abdominal parts bends about it, so the pleopods come with.
@@ -80,8 +128,8 @@ export function createShrimp(scene, simulation) {
       for(let j=0;j<3;j++){
         const pts=[],radii=[];
         for(let k=0;k<=24;k++){
-          const s=k/24,len=j===0?1.42:j===1?1.10:.76;
-          pts.push(V(.25+s*len*(j===2?.66:.95),.23+s*(.66-j*.23)-.26*s*s,sign*(.075+s*(.30+j*.18))));
+          const s=k/24;
+          pts.push(antennaPoint(j,s,sign,V(0,0,0)));
           radii.push(.010*(1-s*.86));
         }
         antennae.push(tint(limb(pts,radii,j),()=>new THREE.Color('#f4f0e6')));
@@ -89,8 +137,8 @@ export function createShrimp(scene, simulation) {
     }
     // One wrapped two-second clock drives every small rhythm on the animal, so their rates
     // are whole multiples of 0.5 Hz and no phase drifts however long the scene has run.
-    const gait={value:new THREE.Vector4(0,0,0,0)},pose={value:new THREE.Vector4(0,0,0,0)},feet={value:FEET.map(()=>0)};
-    const drive=material=>{const inner=material.onBeforeCompile;material.onBeforeCompile=s=>{inner(s);s.uniforms.shrimpGait=gait;s.uniforms.shrimpPose=pose;s.uniforms.shrimpFeet=feet;};return material;};
+    const gait={value:new THREE.Vector4(0,0,0,0)},pose={value:new THREE.Vector4(0,0,0,0)},feet={value:FEET.map(()=>0)},lift={value:new THREE.Vector4(0,0,0,0)};
+    const drive=material=>{const inner=material.onBeforeCompile;material.onBeforeCompile=s=>{inner(s);s.uniforms.shrimpGait=gait;s.uniforms.shrimpPose=pose;s.uniforms.shrimpFeet=feet;s.uniforms.shrimpLift=lift;};return material;};
     const bodyMat=drive(underwater(new THREE.MeshStandardMaterial({vertexColors:true,roughness:.46}),{
       key:'shrimp-shell',transmission:.045,vertex:'uniform vec4 shrimpPose;',begin:FLEX}));
     const body=merge(bodyParts);root.add(new THREE.Mesh(body,bodyMat));
@@ -147,8 +195,14 @@ export function createShrimp(scene, simulation) {
         ${FLEX}`}));
     root.add(new THREE.Mesh(merge(legs),legMat));
     const antennaMat=drive(underwater(new THREE.MeshStandardMaterial({vertexColors:true,roughness:.62}),{
-      key:'shrimp-antennae',vertex:`uniform vec4 shrimpGait;uniform vec4 shrimpPose;${responseGLSL}`,
+      key:'shrimp-antennae',vertex:`uniform vec4 shrimpGait;uniform vec4 shrimpPose;uniform vec4 shrimpLift;${responseGLSL}`,
       begin:`float along=uv.y,side=sign(position.z),tip=along*along,antenna=step(uv.x,.5);
+        // Turned about the base to clear the rock (antennaTurn): rolled, then raised.
+        vec2 turn=side>0.?shrimpLift.yw:shrimpLift.xz;
+        float dy=transformed.y-${ANTENNA_BASE[1]},outward=(transformed.z-side*${ANTENNA_BASE[2]})*side;
+        transformed.y=${ANTENNA_BASE[1]}+dy*cos(turn.y)+outward*sin(turn.y);transformed.z=side*(${ANTENNA_BASE[2]}-dy*sin(turn.y)+outward*cos(turn.y));
+        vec2 fromBase=transformed.xy-vec2(${ANTENNA_BASE[0]},${ANTENNA_BASE[1]});
+        transformed.xy=vec2(${ANTENNA_BASE[0]},${ANTENNA_BASE[1]})+vec2(fromBase.x*cos(turn.x)-fromBase.y*sin(turn.x),fromBase.x*sin(turn.x)+fromBase.y*cos(turn.x));
         vec2 flow=reefResponse(modelMatrix[3].xyz,reefTime,.19);
         // The long white antennae are the advertisement, and they are read from across the
         // tank: whipping them precedes four cleans in five. They sweep forward about once a
@@ -160,11 +214,13 @@ export function createShrimp(scene, simulation) {
         transformed.z+=(sweep*side*.09+flow.y*.20)*tip;
         // L. amboinensis taps a client with its antennae before anything else touches it.
         transformed.y+=(sweep*.11-snap*.11+flow.x*.15+shrimpPose.z*(.30+.12*sin(6.2832*shrimpGait.w)))*tip;
-        transformed.x-=(snap*.035+(1.-shrimpPose.x)*.09*antenna+shrimpPose.w*.22)*tip;`}));
+        transformed.x-=(snap*.035+(1.-shrimpPose.x)*.09*antenna+shrimpPose.w*.22)*tip;
+`}));
     root.add(new THREE.Mesh(merge(antennae),antennaMat));
-    scene.add(root);models.push({root,gait,pose,feet});
+    scene.add(root);models.push({root,gait,pose,feet,lift});
   }
-  return {update(){models.forEach((m,i)=>{const s=simulation.shrimp[i],pose=seatShrimp(s.position.x,s.position.z,s.yaw);
+  let lastTime=simulation.time;const clearance=[0,0];
+  return {update(){const ease=1-Math.exp(-Math.max(0,simulation.time-lastTime)/LIFT_TAU);lastTime=simulation.time;models.forEach((m,i)=>{const s=simulation.shrimp[i],pose=seatShrimp(s.position.x,s.position.z,s.yaw);
     // The seat is the simulation's own (`seatShrimp`): the pitch the ground under the body's
     // length allows and the roll of the line its feet stand on, as separate turns, stood up
     // over what no pitch clears. The body rock that goes with the antennal whip is a lean on
@@ -186,5 +242,10 @@ export function createShrimp(scene, simulation) {
     // Each walking foot then reaches for the ground actually under it.
     FEET.forEach((foot,k)=>{point.copy(foot).applyQuaternion(m.root.quaternion).add(m.root.position);m.feet.value[k]=clamp(supportHeight(point.x,point.z)-point.y,-SHRIMP.stretch,SHRIMP.stretch);});
     m.gait.value.set(s.step,s.walk,s.pick,s.rhythm);m.pose.value.set(s.signal,s.flick,s.reach,s.curl);
+    // Raising to clear rock is immediate, so no frame is drawn inside it; settling back eases.
+    for(const [side,raiseKey,rollKey] of [[-1,'x','z'],[1,'y','w']]){
+      antennaTurn(s,m.root,side,clearance,point);
+      for(const [want,key] of [[clearance[0],raiseKey],[clearance[1],rollKey]]){const have=m.lift.value[key];m.lift.value[key]=want>have?want:have+(want-have)*ease;}
+    }
   });},models};
 }

@@ -359,6 +359,192 @@ assert.ok(
 fed.dispose();
 food.dispose();
 
+// Curious mode: fish steer toward cursor position, form a loose cloud, startle on lunge, respect bounds.
+const curiousScene = new THREE.Scene();
+const curiousSchool = createFishSchool(curiousScene);
+curiousSchool.setMode("curious");
+assert.equal(curiousSchool.mode, "curious", "School mode should be curious");
+
+const curiousPointer = {
+  position: new THREE.Vector3(0, 3.2, 0),
+  velocity: new THREE.Vector3(0, 0, 0),
+  speed: 0,
+};
+
+const curiousDistBefore = curiousSchool.fish.reduce(
+  (sum, f) => sum + f.position.distanceTo(curiousPointer.position),
+  0
+) / COUNT;
+
+for (let i = 0; i < 300; i++) {
+  curiousSchool.update(STEP, 10 + i * STEP, curiousPointer);
+}
+
+const curiousDistAfter = curiousSchool.fish.reduce(
+  (sum, f) => sum + f.position.distanceTo(curiousPointer.position),
+  0
+) / COUNT;
+
+assert.ok(
+  curiousDistAfter < curiousDistBefore,
+  `Curious fish should approach the cursor (before: ${curiousDistBefore.toFixed(2)}, after: ${curiousDistAfter.toFixed(2)})`
+);
+
+for (const f of curiousSchool.fish) {
+  assert.ok(
+    f.position.x >= BOUNDS.minX - 0.1 && f.position.x <= BOUNDS.maxX + 0.1,
+    `Fish ${f.id} X bound violated: ${f.position.x}`
+  );
+  assert.ok(
+    f.position.y >= BOUNDS.minY - 0.1 && f.position.y <= BOUNDS.maxY + 0.1,
+    `Fish ${f.id} Y bound violated: ${f.position.y}`
+  );
+  assert.ok(
+    f.position.z >= BOUNDS.minZ - 0.1 && f.position.z <= BOUNDS.maxZ + 0.1,
+    `Fish ${f.id} Z bound violated: ${f.position.z}`
+  );
+}
+
+let minCuriousSpacing = Infinity;
+for (let i = 0; i < COUNT; i++) {
+  for (let j = i + 1; j < COUNT; j++) {
+    minCuriousSpacing = Math.min(
+      minCuriousSpacing,
+      curiousSchool.fish[i].position.distanceTo(curiousSchool.fish[j].position)
+    );
+  }
+}
+assert.ok(
+  minCuriousSpacing > 0.15,
+  `Curious fish must maintain spacing and not collapse to a point (got ${minCuriousSpacing.toFixed(3)})`
+);
+
+const fish0 = curiousSchool.fish[0];
+const curiousLunge = {
+  position: fish0.position.clone().addScaledVector(fish0.heading, 2.0),
+  velocity: fish0.heading.clone().multiplyScalar(-8),
+};
+let curiousStartled = false;
+for (let i = 0; i < 60; i++) {
+  if (i < 15) curiousLunge.position.addScaledVector(curiousLunge.velocity, STEP);
+  else curiousLunge.velocity.set(0, 0, 0);
+  curiousSchool.update(STEP, 20 + i * STEP, curiousLunge);
+  if (curiousSchool.getTelemetry().pointerResponses > 0) {
+    curiousStartled = true;
+    break;
+  }
+}
+assert.ok(curiousStartled, "A fast lunge must still startle fish in curious mode");
+curiousSchool.dispose();
+
+// Drag selection test: fish projected inside selection box highlight and flick; highlight fades over ~3s when released.
+const selectTank = new THREE.Scene();
+const selectCamera = new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 100);
+selectCamera.position.set(0, 3, 8);
+selectCamera.lookAt(0, 3, 0);
+selectCamera.updateMatrixWorld();
+
+const selectSchool = createFishSchool(selectTank, {
+  obstacles: [{ center: new THREE.Vector3(1.35, 3.6, -0.65), radius: 0.6 }],
+  landmarks: [{ kind: "wood", point: new THREE.Vector3(1.35, 4.3, 0.1), obstacle: 0 }],
+  thickets: THICKETS,
+  camera: selectCamera,
+});
+
+// Fullscreen selection box should select visible fish
+selectSchool.setSelection({ x0: 0, y0: 0, x1: 1920, y1: 1080 });
+selectSchool.update(STEP, 0, null);
+
+const selectedIds = selectSchool.selectedFish;
+assert.ok(selectedIds.length > 0, `Selection box should highlight visible fish (got ${selectedIds.length})`);
+for (const id of selectedIds) {
+  assert.strictEqual(selectSchool.fish[id].highlight, 1.0, `Selected fish ${id} should have highlight 1.0`);
+  assert.ok(selectSchool.fish[id].wasSelected, `Selected fish ${id} wasSelected should be true`);
+}
+
+// Release selection box: highlight should linger and fade over ~3s
+selectSchool.setSelection(null);
+for (let i = 0; i < 60; i++) {
+  selectSchool.update(STEP, 1.0 + i * STEP, null);
+}
+for (const id of selectedIds) {
+  assert.ok(
+    selectSchool.fish[id].highlight > 0 && selectSchool.fish[id].highlight < 1.0,
+    `Highlight should be fading after 1s (got ${selectSchool.fish[id].highlight.toFixed(3)})`
+  );
+}
+
+// After 3.5 total seconds (210 frames total), highlight should reach 0
+for (let i = 0; i < 160; i++) {
+  selectSchool.update(STEP, 2.0 + i * STEP, null);
+}
+for (const id of selectedIds) {
+  assert.strictEqual(selectSchool.fish[id].highlight, 0, `Highlight should fade to 0 after ~3s`);
+}
+selectSchool.dispose();
+
+// Play Mode test: fish stay selected in play mode, follow cursor during herding, and scatter on release
+const playTank = new THREE.Scene();
+const playCamera = new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 100);
+playCamera.position.set(0, 3, 8);
+playCamera.lookAt(0, 3, 0);
+playCamera.updateMatrixWorld();
+
+const playSchool = createFishSchool(playTank, { camera: playCamera });
+playSchool.setPlayMode(true);
+playSchool.setSelection({ x0: 0, y0: 0, x1: 1920, y1: 1080 });
+playSchool.update(STEP, 0, null);
+
+const herdedIds = playSchool.selectedFish;
+assert.ok(herdedIds.length > 0, "Play mode should select visible fish");
+
+// In play mode, when selection marquee is cleared (setSelection(null)), highlight remains 1.0!
+playSchool.setSelection(null);
+for (let i = 0; i < 60; i++) {
+  playSchool.update(STEP, 1.0 + i * STEP, null);
+}
+for (const id of herdedIds) {
+  assert.strictEqual(playSchool.fish[id].highlight, 1.0, "Selected fish highlight must remain 1.0 in play mode");
+}
+
+// Start herding toward a pointer position
+const herdPointer = {
+  position: new THREE.Vector3(2.0, 3.5, 0.5),
+  velocity: new THREE.Vector3(0, 0, 0),
+  speed: 0,
+};
+playSchool.setHerd({ active: true });
+
+const herdDistBefore = herdedIds.reduce(
+  (sum, id) => sum + playSchool.fish[id].position.distanceTo(herdPointer.position),
+  0
+) / herdedIds.length;
+
+for (let i = 0; i < 120; i++) {
+  playSchool.update(STEP, 2.0 + i * STEP, herdPointer);
+}
+
+const herdDistAfter = herdedIds.reduce(
+  (sum, id) => sum + playSchool.fish[id].position.distanceTo(herdPointer.position),
+  0
+) / herdedIds.length;
+
+assert.ok(
+  herdDistAfter < herdDistBefore,
+  `Herded fish should follow pointer (before: ${herdDistBefore.toFixed(2)}, after: ${herdDistAfter.toFixed(2)})`
+);
+
+// Release herding: fish must scatter and highlight reset to 0
+playSchool.setHerd({ active: false });
+playSchool.update(STEP, 4.0, herdPointer);
+for (const id of herdedIds) {
+  assert.strictEqual(playSchool.fish[id].highlight, 0, "Herded fish highlight must reset to 0 upon release");
+}
+assert.strictEqual(playSchool.selectedFish.length, 0, "No fish should remain selected after herd release");
+
+playSchool.setPlayMode(false);
+playSchool.dispose();
+
 console.log(
-  `PASS: 120 simulated seconds; ${roaming}/${COUNT} fish explored all three dimensions; ${(gliding / travelling * 100).toFixed(0)}% of travel was quiet-tail gliding; calm tail beats at most ${peakBeatFrequency.toFixed(2)} Hz; ${visits} inspection frames; ${behind} fish-frames behind the grass; ${(rheotaxis * 100).toFixed(0)}% of hovering fish facing upstream; minimum sampled spacing ${minimumSpacing.toFixed(3)}; slow approach gave room (${before.toFixed(2)} to ${after.toFixed(2)}) without a startle; a lunge startled ${telemetry.pointerResponses} fish directly and ${telemetry.escapes} in all, peaking at ${peakSpeed.toFixed(2)} units per second; a pinch of ${PINCH} pellets drew ${arrivals.size} fish over ${(times[times.length - 1] - times[0]).toFixed(1)} seconds, ${feeding.bites} taken in ${feeding.strikes} strikes, crowding to ${crowding.toFixed(2)} at the food and opening back out to ${regrouped.toFixed(2)}.`,
+  `PASS: 120 simulated seconds; ${roaming}/${COUNT} fish explored all three dimensions; ${(gliding / travelling * 100).toFixed(0)}% of travel was quiet-tail gliding; calm tail beats at most ${peakBeatFrequency.toFixed(2)} Hz; ${visits} inspection frames; ${behind} fish-frames behind the grass; ${(rheotaxis * 100).toFixed(0)}% of hovering fish facing upstream; minimum sampled spacing ${minimumSpacing.toFixed(3)}; slow approach gave room (${before.toFixed(2)} to ${after.toFixed(2)}) without a startle; a lunge startled ${telemetry.pointerResponses} fish directly and ${telemetry.escapes} in all, peaking at ${peakSpeed.toFixed(2)} units per second; a pinch of ${PINCH} pellets drew ${arrivals.size} fish over ${(times[times.length - 1] - times[0]).toFixed(1)} seconds, ${feeding.bites} taken in ${feeding.strikes} strikes, crowding to ${crowding.toFixed(2)} at the food and opening back out to ${regrouped.toFixed(2)}; curious mode verified; selection box highlight, flick, and ~3s fade-out verified.`,
 );

@@ -1,0 +1,94 @@
+using System.Text.Json;
+using Microsoft.Win32;
+
+namespace DesktopHabitats;
+
+public class AppSettings
+{
+    public string Habitat { get; set; } = "riverscape";
+    public bool Paused { get; set; } = false;
+    public bool StartWithWindows { get; set; } = false;
+    public bool ClickToFeed { get; set; } = false;
+    public string FishBehaviour { get; set; } = "shy";
+    public bool SelectFish { get; set; } = false;
+    public string Population { get; set; } = "normal";
+    // Render quality passed to the scenes: "eco", "balanced" or "detail". Detail draws a
+    // screen at full resolution; the lower two cap the pixel count and frame rate.
+    public string Quality { get; set; } = "detail";
+}
+
+public static class SettingsManager
+{
+    private static readonly string AppDataFolder = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "DesktopHabitats");
+    private static readonly string SettingsFile = Path.Combine(AppDataFolder, "settings.json");
+    private const string RegistryRunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string AppName = "DesktopHabitats";
+
+    public static AppSettings Load()
+    {
+        try
+        {
+            if (File.Exists(SettingsFile))
+            {
+                var json = File.ReadAllText(SettingsFile);
+                var settings = JsonSerializer.Deserialize<AppSettings>(json);
+                if (settings != null)
+                {
+                    return settings;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to load settings: {ex.Message}");
+        }
+
+        return new AppSettings();
+    }
+
+    public static void Save(AppSettings settings)
+    {
+        try
+        {
+            if (!Directory.Exists(AppDataFolder))
+            {
+                Directory.CreateDirectory(AppDataFolder);
+            }
+
+            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(SettingsFile, json);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to save settings: {ex.Message}");
+        }
+    }
+
+    public static void SetStartWithWindows(bool enable)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RegistryRunKey, true);
+            if (key == null) return;
+
+            if (enable)
+            {
+                var exePath = Environment.ProcessPath;
+                if (!string.IsNullOrEmpty(exePath))
+                {
+                    key.SetValue(AppName, $"\"{exePath}\"");
+                }
+            }
+            else
+            {
+                key.DeleteValue(AppName, false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to configure startup registry key: {ex.Message}");
+        }
+    }
+}

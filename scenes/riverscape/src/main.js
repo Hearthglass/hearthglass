@@ -4,7 +4,7 @@ import { createComposite } from './composite.js';
 import * as THREE from "three";
 import { createEnvironment, createParticles } from "./environment.js";
 import { createPlants } from "./plants.js";
-import { createFishSchool } from "./fish.js";
+import { createFishSchool, POPULATIONS } from "./fish.js";
 import { createFood } from "./food.js";
 import { randomGenerator } from "./math.js";
 import { waterTime } from "./water.js";
@@ -30,6 +30,15 @@ let onBattery = false;
 let settings = renderSettings({ profile, wallpaper, pixelRatio: devicePixelRatio });
 let requestedRate = wallpaper ? 0 : 60;
 let loop = null, applyPower = null, updateControls = () => {};
+// The shoal is sized when the scene is built, so a different size is a reload with the level
+// in the URL; the wallpaper host puts it there itself.
+const population = Object.hasOwn(POPULATIONS, query.get("population")) ? query.get("population") : "normal";
+window.habitatPopulation = (level) => {
+  if (!Object.hasOwn(POPULATIONS, level) || level === population) return;
+  const url = new URL(location.href);
+  url.searchParams.set("population", level);
+  location.replace(url);
+};
 window.habitatPause = (value) => { paused = Boolean(value); loop?.setPaused(paused); updateControls(); };
 window.habitatRate = (fps) => {
   requestedRate = Number.isFinite(fps) && fps > 0 ? Math.min(120, fps) : 0;
@@ -50,10 +59,29 @@ window.habitatPower = (battery) => {
 // exists and harmless until it does. Nothing is dropped into water that is not moving,
 // whichever of the two reasons it is still for: pellets nobody is drawing are pellets the
 // fish never see, and they would all arrive at once whenever the water started again.
-let sprinkle = null;
+let sprinkle = null, changeMode = null, currentMode = "shy", changeSelection = null, changePlayMode = null, changeHerd = null, fishSchool = null;
 window.habitatFeed = () => {
   if (sprinkle && loop?.state.running) sprinkle();
 };
+window.habitatMode = (mode) => {
+  currentMode = mode === "curious" ? "curious" : "shy";
+  changeMode?.(currentMode);
+};
+window.habitatSelect = (box) => {
+  changeSelection?.(box);
+};
+window.habitatPlayMode = (active) => {
+  changePlayMode?.(active);
+};
+window.habitatHerd = (state) => {
+  changeHerd?.(state);
+};
+// One more fish into still-moving water; false if the water is still or the tank is full.
+window.habitatAddFish = () => Boolean(loop?.state.running && fishSchool?.addFish());
+Object.defineProperty(window, 'habitatSelectedCount', {
+  get: () => fishSchool?.selectedFish?.length || 0,
+  configurable: true,
+});
 
 
 
@@ -163,7 +191,15 @@ async function start() {
     landmarks,
     thickets: plants.thickets,
     food,
+    camera,
+    count: POPULATIONS[population],
   });
+  fishSchool = fish;
+  changeMode = (mode) => { fish.setMode(mode); };
+  changeSelection = (box) => { fish.setSelection(box); };
+  changePlayMode = (active) => { fish.setPlayMode(active); };
+  changeHerd = (state) => { fish.setHerd(state); };
+  fish.setMode(currentMode);
   const particles = createParticles(scene, { thickets: plants.thickets });
 
   const { target, post, postScene, postCamera } = createComposite(camera, settings);

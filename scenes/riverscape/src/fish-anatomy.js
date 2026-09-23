@@ -834,6 +834,7 @@ export function applySkin(shader) {
       varying vec3 vSkinPoint;
       varying vec2 vFishUV;
       varying float vFishPart;
+      varying float vHighlight;
 
       // What the tissue under this fragment passes: set once the anatomy is known, read
       // back by every light below.
@@ -1179,6 +1180,10 @@ export function applySkin(shader) {
       // small enough to leave the modelling alone.
       reflectedLight.indirectDiffuse += (irradiance + iblIrradiance) * gFishThrough
         * ${glsl(THROUGH.ambient)} * RECIPROCAL_PI;
+      if (vHighlight > 0.0) {
+        float fresnel = pow(1.0 - max(dot(geometryNormal, geometryViewDir), 0.0), 2.5);
+        reflectedLight.directDiffuse += vec3(0.15, 0.50, 0.65) * (vHighlight * fresnel * 1.8 + vHighlight * 0.15);
+      }
     `,
     );
 }

@@ -10,6 +10,12 @@ import {
 } from "./fish-anatomy.js";
 
 export const COUNT = 24;
+// Shoal sizes the host offers, Normal being COUNT. Fish added by hand come on top, up to
+// ADD_LIMIT; the GPU buffers are sized once for the largest of all that, so adding a fish
+// never reallocates them or recompiles a shader.
+export const POPULATIONS = { few: 12, normal: COUNT, lots: 40, crowded: 60 };
+export const ADD_LIMIT = 20;
+const CAPACITY = POPULATIONS.crowded + ADD_LIMIT;
 // The whole water column the fish may use. The floor is the sand, tracked separately.
 export const BOUNDS = {
   minX: -8.3,
@@ -340,7 +346,7 @@ function applySwimming(material, withColor = true) {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader.replace(
       "#include <common>",
-      `#include <common>\n${SWIM_GLSL}`,
+      `#include <common>\n${SWIM_GLSL}\nattribute float aHighlight;\nvarying float vHighlight;`,
     );
     if (withColor) {
       shader.vertexShader = shader.vertexShader
@@ -358,6 +364,7 @@ function applySwimming(material, withColor = true) {
           vSkinPoint = position;
           vFishUV = uv;
           vFishPart = aPart;
+          vHighlight = aHighlight;
         `,
         );
       applySkin(shader);
@@ -408,25 +415,37 @@ function rotateAboutY(v, angle) {
 
 export function createFishSchool(
   scene,
-  { obstacles = [], landmarks = [], thickets = [], food = null } = {},
+  { obstacles = [], landmarks = [], thickets = [], food = null, camera = null, count = COUNT } = {},
 ) {
+  count = Math.max(1, Math.min(POPULATIONS.crowded, Math.round(count)));
+  let activeCamera = camera;
+  let selectionBox = null;
+  let playMode = false;
+  let isHerding = false;
+  const tempProj = new THREE.Vector3();
   const random = randomGenerator(583137);
   const range = (min, max) => min + random() * (max - min);
   const exponential = (mean) => -mean * Math.log(1 - random());
   const geometry = makeAnatomy();
   const swimAttribute = new THREE.InstancedBufferAttribute(
-    new Float32Array(COUNT * 4),
+    new Float32Array(CAPACITY * 4),
     4,
   );
   const finPhaseAttribute = new THREE.InstancedBufferAttribute(
-    new Float32Array(COUNT), 1,
+    new Float32Array(CAPACITY), 1,
+  );
+  const highlightAttribute = new THREE.InstancedBufferAttribute(
+    new Float32Array(CAPACITY), 1,
   );
   swimAttribute.setUsage(THREE.DynamicDrawUsage);
   finPhaseAttribute.setUsage(THREE.DynamicDrawUsage);
+  highlightAttribute.setUsage(THREE.DynamicDrawUsage);
   geometry.body.setAttribute("aSwim", swimAttribute);
   geometry.fins.setAttribute("aSwim", swimAttribute);
   geometry.body.setAttribute("aFinPhase", finPhaseAttribute);
   geometry.fins.setAttribute("aFinPhase", finPhaseAttribute);
+  geometry.body.setAttribute("aHighlight", highlightAttribute);
+  geometry.fins.setAttribute("aHighlight", highlightAttribute);
   const { skin: skinMaterial, fins: finMaterial } = createFishMaterials();
   const depthMaterial = new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking,
@@ -434,8 +453,8 @@ export function createFishSchool(
   applySwimming(skinMaterial);
   applySwimming(finMaterial);
   applySwimming(depthMaterial, false);
-  const bodies = new THREE.InstancedMesh(geometry.body, skinMaterial, COUNT);
-  const membranes = new THREE.InstancedMesh(geometry.fins, finMaterial, COUNT);
+  const bodies = new THREE.InstancedMesh(geometry.body, skinMaterial, CAPACITY);
+  const membranes = new THREE.InstancedMesh(geometry.fins, finMaterial, CAPACITY);
   bodies.name = "Silver-blue freshwater fish";
   membranes.name = "Attached translucent fish fins";
   bodies.castShadow = true;
@@ -468,9 +487,11 @@ export function createFishSchool(
   let startled = 0;
   let escapes = 0;
   const initialPositions = [];
-  const fish = Array.from({ length: COUNT }, (_, id) => {
+  const fish = Array.from({ length: count }, (_, id) => {
     const band = id % 6;
     const position = new THREE.Vector3();
+    // A crowded tank can run out of room this far apart; the last try is taken as it is.
+    let tries = 0;
     do {
       position.set(
         -5.7 + band * 2.18 + range(-0.45, 0.45),
@@ -478,6 +499,7 @@ export function createFishSchool(
         range(0.42, 2.7),
       );
     } while (
+      ++tries < 200 &&
       initialPositions.some((other) => other.distanceToSquared(position) < 0.55)
     );
     initialPositions.push(position);
@@ -487,6 +509,9 @@ export function createFishSchool(
       range(-0.045, 0.045),
       range(-0.16, 0.16),
     ).normalize();
+    return createFish(id, position, heading);
+  });
+  function createFish(id, position, heading) {
     return {
       id,
       position,
@@ -542,8 +567,11 @@ export function createFishSchool(
       splashSlot: 0,
       recruiter: null,
       recruitAt: 0,
+      highlight: 0,
+      wasSelected: false,
     };
-  });
+  }
+  bodies.count = membranes.count = fish.length;
   const delta = new THREE.Vector3();
   const target = new THREE.Vector3();
   const desired = new THREE.Vector3();
@@ -575,6 +603,9 @@ export function createFishSchool(
   // that wants to point upstream has to ask rather than assume. Kept apart from `water`,
   // which holds a velocity the swimming code subtracts off.
   const downstream = new THREE.Vector3();
+  const curiousTarget = new THREE.Vector3();
+  let behaviorMode = "shy";
+  let pointerStillTime = 0;
 
   // Where the last few pinches of food hit the film, and how fast the water was moving
   // there. Every fish that felt one points at the same record rather than carrying its
@@ -1045,6 +1076,59 @@ export function createFishSchool(
       startled++;
       return;
     }
+
+    if (isHerding && f.highlight > 0 && f.mode !== "escape") {
+      const angle = (f.id * 137.5 * Math.PI) / 180;
+      const radius = 0.35 + 0.15 * (f.id % 5);
+      curiousTarget.set(
+        pointer.position.x + Math.cos(angle) * radius,
+        pointer.position.y - 0.2 - 0.1 * (f.id % 4),
+        pointer.position.z + Math.sin(angle) * radius,
+      );
+      clampToBox(curiousTarget, BOUNDS, 0.4);
+
+      delta.subVectors(curiousTarget, f.position);
+      const dist = delta.length();
+      if (dist > 1e-3) {
+        const arrival = Math.min(1.0, dist / 1.2);
+        const pull = SWIM.cruise * arrival * 2.2;
+        urge.addScaledVector(delta.normalize(), pull);
+        f.effort = Math.min(1.0, f.effort + dt * 2.5);
+        if (f.mode === "hover") {
+          f.anchor.lerp(curiousTarget, 1 - Math.exp(-dt * 2.0));
+          clampToBox(f.anchor, BOUNDS, 0.4);
+        }
+      }
+      return;
+    }
+
+    if (behaviorMode === "curious") {
+      const interest = pointerStillTime < 8.0 ? 1.0 : Math.max(0, 1 - (pointerStillTime - 8.0) / 3.0);
+      if (interest > 0 && f.mode !== "feed" && f.mode !== "escape") {
+        const angle = (f.id * 137.5 * Math.PI) / 180;
+        const radius = 0.9 + 0.35 * (f.id % 5);
+        curiousTarget.set(
+          pointer.position.x + Math.cos(angle) * radius,
+          pointer.position.y - 0.35 - 0.2 * (f.id % 4),
+          pointer.position.z + Math.sin(angle) * radius,
+        );
+        clampToBox(curiousTarget, BOUNDS, 0.5);
+
+        delta.subVectors(curiousTarget, f.position);
+        const dist = delta.length();
+        if (dist > 1e-3) {
+          const arrival = Math.min(1.0, dist / 2.0);
+          const pull = SWIM.cruise * arrival * 0.95 * interest;
+          urge.addScaledVector(delta.normalize(), pull);
+          if (f.mode === "hover") {
+            f.anchor.lerp(curiousTarget, 1 - Math.exp(-dt * 0.8 * interest));
+            clampToBox(f.anchor, BOUNDS, 0.5);
+          }
+        }
+        return;
+      }
+    }
+
     // Something merely close is given room, less and less as it becomes familiar.
     const zone = THREAT.flightZone / (1 + f.alarm);
     if (d < zone) {
@@ -1084,6 +1168,53 @@ export function createFishSchool(
     dt = Math.min(Math.max(dt, 0), 0.05);
     elapsed += dt;
     waterClock = time;
+    if (pointer) {
+      const speed = pointer.velocity ? pointer.velocity.length() : (pointer.speed || 0);
+      if (speed < 0.15) {
+        pointerStillTime += dt;
+      } else {
+        pointerStillTime = Math.max(0, pointerStillTime - dt * 2);
+      }
+    } else {
+      pointerStillTime = 0;
+    }
+    if (selectionBox && activeCamera) {
+      const minX = Math.min(selectionBox.x0, selectionBox.x1);
+      const maxX = Math.max(selectionBox.x0, selectionBox.x1);
+      const minY = Math.min(selectionBox.y0, selectionBox.y1);
+      const maxY = Math.max(selectionBox.y0, selectionBox.y1);
+      const w = typeof window !== "undefined" ? window.innerWidth : 1920;
+      const h = typeof window !== "undefined" ? window.innerHeight : 1080;
+
+      for (const f of fish) {
+        tempProj.copy(f.position).project(activeCamera);
+        if (tempProj.z >= -1 && tempProj.z <= 1) {
+          const sx = (tempProj.x * 0.5 + 0.5) * w;
+          const sy = (-tempProj.y * 0.5 + 0.5) * h;
+          if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY) {
+            f.highlight = 1.0;
+            if (!f.wasSelected) {
+              f.wasSelected = true;
+              const flickAngle = range(-0.6, 0.6);
+              startFlick(f, flickAngle, twitchProfile(flickAngle));
+            }
+          } else if (!f.wasSelected) {
+            f.highlight = Math.max(0, f.highlight - dt / 0.5);
+          }
+        } else if (!f.wasSelected) {
+          f.highlight = Math.max(0, f.highlight - dt / 0.5);
+        }
+      }
+    } else {
+      for (const f of fish) {
+        f.wasSelected = false;
+        if (playMode && f.highlight > 0.05 && !isHerding) {
+          f.highlight = 1.0;
+        } else if (f.highlight > 0) {
+          f.highlight = Math.max(0, f.highlight - dt / 3.0);
+        }
+      }
+    }
     // A pellet touching the film is the loudest thing that happens in a quiet tank, and
     // the first thing anyone notices: heads turn across the near half of the water before
     // a single fish has swum anywhere. Every pellet that has entered the water since the
@@ -1236,6 +1367,11 @@ export function createFishSchool(
       }
 
       if (elapsed >= f.until) decide(f);
+      if (behaviorMode === "curious" && pointer && pointerStillTime > 1.0 && f.mode === "travel") {
+        if (f.position.distanceTo(pointer.position) < 2.5 && random() < dt * 0.8) {
+          settle(f);
+        }
+      }
       if (f.mode !== "inspect" && f.mode !== "feed")
         f.curiosity = Math.min(1, f.curiosity + dt * 0.012 * f.character);
       const mayFlick = !f.flick && elapsed > f.lastFlick + 0.6;
@@ -1441,7 +1577,8 @@ export function createFishSchool(
       } else desired.set(0, 0, 0);
       desired.add(avoid).sub(water);
       desired.addScaledVector(separation, SHOAL.separation * (1 - 0.4 * f.keen));
-      if (f.mode === "travel") desired.add(urge);
+      if (isHerding && f.highlight > 0) desired.addScaledVector(urge, 1.8);
+      else if (f.mode === "travel") desired.add(urge);
       else if (f.mode === "hover") desired.addScaledVector(urge, 0.5);
       // A feeding fish ignores the shoal, but not something that has come too close: the
       // give-way term the pointer writes into the same pull is kept.
@@ -1638,6 +1775,7 @@ export function createFishSchool(
         f.finBrake,
       );
       finPhaseAttribute.setX(f.id, f.finPhase);
+      highlightAttribute.setX(f.id, f.highlight);
 
       axisZ.crossVectors(heading, UP).normalize();
       axisY.crossVectors(axisZ, heading).normalize();
@@ -1658,6 +1796,7 @@ export function createFishSchool(
     membranes.instanceMatrix.needsUpdate = true;
     swimAttribute.needsUpdate = true;
     finPhaseAttribute.needsUpdate = true;
+    highlightAttribute.needsUpdate = true;
   }
 
   for (const f of fish) if (f.id % 4 !== 0) leave(f);
@@ -1665,6 +1804,74 @@ export function createFishSchool(
   return {
     update,
     fish,
+    // One more fish, swimming in from a side of the tank to join the others. False once
+    // ADD_LIMIT have been added.
+    addFish() {
+      if (fish.length >= count + ADD_LIMIT) return false;
+      const side = random() < 0.5 ? -1 : 1;
+      const position = new THREE.Vector3(side * (BOUNDS.maxX - 0.4), range(2.6, 5.6), range(0.5, 2.6));
+      const heading = new THREE.Vector3(-side, range(-0.04, 0.04), range(-0.12, 0.12)).normalize();
+      const f = createFish(fish.length, position, heading);
+      f.swim.copy(heading).multiplyScalar(0.12);
+      fish.push(f);
+      bodies.count = membranes.count = fish.length;
+      target.set(-side * range(1, 4.5), range(2.8, 5.2), range(0.6, 2.4));
+      clampToBox(target, BOUNDS, 0.45);
+      travel(f, target, false);
+      return true;
+    },
+    setMode(value) {
+      behaviorMode = value === "curious" ? "curious" : "shy";
+    },
+    get mode() {
+      return behaviorMode;
+    },
+    setSelection(box) {
+      if (box === 'clear') {
+        selectionBox = null;
+        for (const f of fish) {
+          f.highlight = 0;
+          f.wasSelected = false;
+        }
+        return;
+      }
+      selectionBox = box;
+    },
+    setPlayMode(active) {
+      playMode = Boolean(active);
+      if (!playMode) {
+        isHerding = false;
+        for (const f of fish) {
+          f.highlight = 0;
+          f.wasSelected = false;
+        }
+      }
+    },
+    setHerd(state) {
+      const next = typeof state === 'object' && state !== null ? Boolean(state.active) : Boolean(state);
+      if (isHerding && !next) {
+        for (const f of fish) {
+          if (f.highlight > 0) {
+            const scatterAngle = (random() - 0.5) * Math.PI * 0.9;
+            startFlick(f, scatterAngle, twitchProfile(scatterAngle));
+            f.velocity.add(new THREE.Vector3(
+              (random() - 0.5) * 2.8,
+              (random() - 0.5) * 1.5,
+              (random() - 0.5) * 2.8
+            ));
+            f.highlight = 0;
+            f.wasSelected = false;
+          }
+        }
+      }
+      isHerding = next;
+    },
+    setCamera(cam) {
+      activeCamera = cam;
+    },
+    get selectedFish() {
+      return fish.filter((f) => f.highlight > 0.05).map((f) => f.id);
+    },
     getTelemetry() {
       const states = { hover: 0, travel: 0, settle: 0, inspect: 0, feed: 0, escape: 0 };
       let twitching = 0,
@@ -1680,10 +1887,10 @@ export function createFishSchool(
         maximumSpeed = Math.max(maximumSpeed, speed);
       }
       return {
-        count: COUNT,
+        count: fish.length,
         states,
         twitching,
-        averageSpeed: totalSpeed / COUNT,
+        averageSpeed: totalSpeed / fish.length,
         maximumSpeed,
         pointerResponses: startled,
         escapes,

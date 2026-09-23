@@ -4,7 +4,7 @@ register('../../riverscape/tests/three-loader.mjs', import.meta.url);
 const { ReefSimulation, FIXED_STEP, POPULATION, SHRIMP }=await import('../src/simulation.js');
 const { currentAt,responseAt,WAVES,SURFACE }=await import('../src/water.js');
 const { HOST }=await import('../src/terrain.js');
-const { Vector3 }=await import('three');
+const { Vector3, PerspectiveCamera }=await import('three');
 const V=(x=0,y=0,z=0)=>new Vector3(x,y,z);
 const sim=new ReefSimulation();
 assert.equal(sim.fish.length,19);assert.equal(sim.shrimp.length,2);assert.equal(POPULATION.clownfish,3);
@@ -92,4 +92,72 @@ for(const t of [0,1,10,100,10000]){
 }
 for(const w of WAVES)assert.ok(Math.abs(w.omega*w.omega-98.1*w.k*Math.tanh(w.k*SURFACE))<1e-9);
 assert.throws(()=>sim.step(NaN),RangeError);assert.throws(()=>sim.step(1),RangeError);
+// Curious mode: open water fish approach pointer; lunge still spooks fish to shelter.
+const curSim=new ReefSimulation(1234);curSim.setMode('curious');
+assert.equal(curSim.mode,'curious');
+const curPointer={position:V(0,3,0),speed:0};
+const beforeDist=curSim.fish.filter(f=>f.kind!=='clown').reduce((sum,f)=>sum+f.position.distanceTo(curPointer.position),0)/16;
+for(let i=0;i<300;i++)curSim.step(FIXED_STEP,curPointer);
+const afterDist=curSim.fish.filter(f=>f.kind!=='clown').reduce((sum,f)=>sum+f.position.distanceTo(curPointer.position),0)/16;
+assert.ok(afterDist<beforeDist,`Curious reef fish should approach pointer: before ${beforeDist.toFixed(2)}, after ${afterDist.toFixed(2)}`);
+const lungePointer={position:curSim.fish[0].position.clone(),speed:2.5};
+curSim.step(FIXED_STEP,lungePointer);
+assert.equal(curSim.fish[0].state,'shelter','Lunge must trigger shelter even in curious mode');
+
+// Drag selection test
+const selSim=new ReefSimulation(5678);
+const selCamera=new PerspectiveCamera(36,16/9,0.08,140);
+selCamera.position.set(0,3,10);
+selCamera.lookAt(0,2,0);
+selCamera.updateMatrixWorld();
+selSim.setSelection({x0:0,y0:0,x1:1920,y1:1080},selCamera);
+selSim.step(FIXED_STEP);
+assert.ok(selSim.selectedFish.length>0,`Reefscape selection box should select fish (got ${selSim.selectedFish.length})`);
+for(const idx of selSim.selectedFish){
+  assert.equal(selSim.fish[idx].highlight,1.0,'Selected fish highlight should be 1.0');
+  assert.ok(selSim.fish[idx].wasSelected,'wasSelected should be true');
+}
+selSim.setSelection(null);
+for(let i=0;i<60;i++)selSim.step(FIXED_STEP);
+for(const idx of selSim.selectedFish){
+  assert.ok(selSim.fish[idx].highlight>0&&selSim.fish[idx].highlight<1.0,'Highlight should be fading after 1s');
+}
+for(let i=0;i<160;i++)selSim.step(FIXED_STEP);
+for(const f of selSim.fish){
+  assert.equal(f.highlight,0,'Highlight should fade to 0 after ~3s');
+}
+assert.equal(selSim.selectedFish.length,0,'No fish should remain selected after fade-out');
+
+// Play Mode test: fish remain selected in play mode, herd to pointer, and scatter on release
+const playSim=new ReefSimulation(9999);
+playSim.setPlayMode(true);
+playSim.setSelection({x0:0,y0:0,x1:1920,y1:1080},selCamera);
+playSim.step(FIXED_STEP);
+assert.ok(playSim.selectedFish.length>0,'Play mode should select visible fish');
+const herdedReefCount=playSim.selectedFish.length;
+
+// In play mode, clearing the selection marquee (null) retains highlight = 1.0
+playSim.setSelection(null);
+for(let i=0;i<60;i++)playSim.step(FIXED_STEP);
+for(const idx of playSim.selectedFish){
+  assert.equal(playSim.fish[idx].highlight,1.0,'Play mode fish highlight should remain 1.0');
+}
+
+// Herd toward a pointer
+const herdReefPointer={position:V(1.5,3.0,1.0),speed:0};
+playSim.setHerd({active:true});
+const reefDistBefore=playSim.selectedFish.reduce((sum,idx)=>sum+playSim.fish[idx].position.distanceTo(herdReefPointer.position),0)/herdedReefCount;
+for(let i=0;i<120;i++)playSim.step(FIXED_STEP,herdReefPointer);
+const reefDistAfter=playSim.selectedFish.reduce((sum,idx)=>sum+playSim.fish[idx].position.distanceTo(herdReefPointer.position),0)/herdedReefCount;
+assert.ok(reefDistAfter<reefDistBefore,`Herded reef fish should follow pointer (before ${reefDistBefore.toFixed(2)}, after ${reefDistAfter.toFixed(2)})`);
+
+// Release herd: scatter and highlight resets to 0
+playSim.setHerd({active:false});
+playSim.step(FIXED_STEP,herdReefPointer);
+for(const f of playSim.fish){
+  assert.equal(f.highlight,0,'Herded reef fish highlight must reset to 0 upon release');
+}
+assert.equal(playSim.selectedFish.length,0,'No fish should remain selected after herd release');
+playSim.setPlayMode(false);
+
 console.log(JSON.stringify({pass:true,simulatedSeconds:sim.time,consumed:sim.consumed,maxClownfishHostDistance:maxHome,...sim.diagnostics()},null,2));
