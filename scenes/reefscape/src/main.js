@@ -35,7 +35,12 @@ window.habitatHerd=state=>changeHerd(state);
 // in the URL; the wallpaper host puts it there itself.
 const population=Object.hasOwn(POPULATIONS,params.get('population'))?params.get('population'):'normal';
 window.habitatPopulation=level=>{if(!Object.hasOwn(POPULATIONS,level)||level===population)return;const url=new URL(location.href);url.searchParams.set('population',level);location.replace(url);};
-let addFish=()=>false;window.habitatAddFish=()=>addFish();
+// One more fish, at a point on the page (CSS px) when given.
+let addFish=()=>false;window.habitatAddFish=(x,y)=>addFish(x,y);
+// A drag on the page from the host: {phase:'start'|'move'|'end'|'cancel',x0,y0,x,y} in CSS px.
+// Begun on the held selection it carries it, anywhere else it draws a marquee; answers
+// 'herd', 'select' or 'none'.
+let drag=()=>'none';window.habitatDrag=gesture=>drag(gesture);
 
 
 
@@ -98,7 +103,7 @@ async function start(){
   // then fail the depth test without sampling the triplanar texture layers.
   const rockDepthMaterial=new THREE.MeshBasicMaterial({colorWrite:false});
   rockPrepass.add(new THREE.Mesh(rockSurface.geometry,rockDepthMaterial));
-  const simulation=new ReefSimulation(undefined,population);
+  const simulation=new ReefSimulation(undefined,population);simulation.camera=camera;
   changeMode=mode=>simulation.setMode(mode);simulation.setMode(currentMode);
   changeSelection=box=>simulation.setSelection(box,camera);
   changePlayMode=active=>simulation.setPlayMode(active);
@@ -189,9 +194,14 @@ async function start(){
     pointer.position.copy(point);pointer.speed=Math.min(15,speed);lastPoint.copy(point);lastPointer=now;
   },{passive:true});
   canvas.addEventListener('pointerleave',()=>{pointer=null;});
-  canvas.addEventListener('pointerdown',event=>{if(event.button!==0||!running()||!project(event))return;simulation.feed(point.x,1);});
+  // A click puts a pinch in right where it was, where its line of sight crosses the open
+  // water in front of the reef.
+  const feedPlane=new THREE.Plane(new THREE.Vector3(0,0,1),-2.2),feedPoint=new THREE.Vector3();
+  canvas.addEventListener('pointerdown',event=>{if(event.button!==0||!running()||!project(event))return;
+    if(raycaster.ray.intersectPlane(feedPlane,feedPoint))simulation.feed(feedPoint.x,feedPoint.z,feedPoint.y);});
   feed=()=>{if(running())simulation.feed(-2.6+Math.sin(simulation.time*.73)*1.7,1.3);};
-  addFish=()=>Boolean(running()&&simulation.addFish());
+  addFish=(x,y)=>Boolean(running()&&simulation.addFish(x,y));
+  drag=gesture=>running()?simulation.drag(gesture):'none';
   updateControls=installControls({habitat,isPaused:()=>paused,isRunning:running,
     pause:window.habitatPause,feed,quality:()=>quality,
     setQuality(value){quality=qualityName(value);autoScale=1;resize();restart();},

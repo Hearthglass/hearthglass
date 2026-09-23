@@ -58,4 +58,23 @@ for (const [level, count] of Object.entries(POPULATIONS)) {
   for (const f of school.fish) assert.ok(inside(f.position), `${level}: added fish ${f.id} outside the tank`);
   report.push(`${level} ${count}+${ADD_LIMIT}: spacing ${spacing.toFixed(2)}, ${(moving * 100).toFixed(0)}% moving`);
 }
+// A fish added at a point on the page appears under that point, grows in, and swims off.
+{
+  const camera = new THREE.PerspectiveCamera(25.8, 16 / 9, 0.2, 65);
+  camera.position.set(0, 4.65, 20.5);
+  camera.lookAt(0, 4.15, 0);
+  camera.updateMatrixWorld();
+  const school = createFishSchool(new THREE.Scene(), { thickets: THICKETS, camera });
+  const click = { x: 700, y: 420 };
+  assert.ok(school.addFish(click.x, click.y), "A fish can be added at a point");
+  const added = school.fish[school.fish.length - 1];
+  const seen = added.position.clone().project(camera);
+  const offset = Math.hypot((seen.x * 0.5 + 0.5) * 1920 - click.x, (-seen.y * 0.5 + 0.5) * 1080 - click.y);
+  assert.ok(offset < 40, `An added fish must appear under the click (${offset.toFixed(0)}px away)`);
+  assert.ok(added.grow < 1, "An added fish grows in rather than popping into being");
+  for (let frame = 0; frame < 120; frame++) school.update(STEP, frame * STEP, null);
+  assert.equal(added.grow, 1);
+  assert.ok(inside(added.position));
+  report.push(`added at a click ${offset.toFixed(0)}px from it`);
+}
 console.log(`PASS: ${report.join("; ")}`);

@@ -14,8 +14,41 @@ export const COUNT = 24;
 // ADD_LIMIT; the GPU buffers are sized once for the largest of all that, so adding a fish
 // never reallocates them or recompiles a shader.
 export const POPULATIONS = { few: 12, normal: COUNT, lots: 40, crowded: 60 };
-export const ADD_LIMIT = 20;
+export const ADD_LIMIT = 200;
 const CAPACITY = POPULATIONS.crowded + ADD_LIMIT;
+// A finished drag-selection is held this long, in seconds, so the group can be picked up
+// and dragged around the tank; each drag renews it. Then the highlight fades.
+export const SELECTION_HOLD = 12;
+const SELECTION_FADE = 1.5;
+// How close (CSS pixels) a press must land to a selected fish on screen to pick the group up.
+const GRAB_RADIUS = 90;
+// Swimming to a moving place: the dragged group's formation, or the ring of fish a curious
+// tank keeps around the cursor. Slots are laid out as a sunflower, `ring` out from the
+// centre and `spacing` further for each fish beyond the first, so a big group opens out
+// rather than piling onto one point. A curious fish notices the cursor after a moment that
+// grows with its distance, so the tank turns toward it as a wave rather than all at once,
+// and loses interest only in a cursor that has sat still for `bored` seconds.
+const FOLLOW = {
+  herdSpeed: 5,
+  // A group let go of swims on to where it was put down for up to `deliver` seconds, and
+  // settles once its fish are on average within `arrived` of their places.
+  deliver: 6,
+  arrived: 0.4,
+  curiousSpeed: 2.3,
+  gain: 1.7,
+  herdRing: 0.2,
+  herdSpacing: 0.26,
+  ring: 0.75,
+  spacing: 0.3,
+  notice: [0.08, 0.5],
+  noticePerUnit: 0.1,
+  bored: 15,
+  boredFade: 4,
+};
+// A shy fish is pushed out of the cursor's way rather than only startled by it. The push
+// reaches further and is stronger the faster the cursor moves, and once it passes `trigger`
+// a fish swims off, out of the cursor's path, at up to (1 + hurry) times its cruise.
+const SHY = { radius: 3.2, reachGain: 0.12, speedGain: 0.5, trigger: 0.35, flee: [2.2, 3.8], hurry: 1.3, calm: 1.6 };
 // The whole water column the fish may use. The floor is the sand, tracked separately.
 export const BOUNDS = {
   minX: -8.3,
@@ -50,6 +83,7 @@ const SWIM = {
     settle: 0,
     inspect: 1.2,
     travel: 6.0,
+    follow: 7.0,
     feed: 9.0,
     escape: 0,
   },
@@ -137,7 +171,7 @@ const CSTART = {
 // the threshold for a while, so a harmless stimulus repeated soon stops working.
 const THREAT = {
   range: 3.8,
-  looming: 1.0,
+  looming: 1.4,
   rate: 7,
   flightZone: 2.0,
   giveWay: 0.8,
@@ -170,19 +204,19 @@ const CONTAGION = { range: 2.2, chance: 0.9, latency: [0.04, 0.13], spread: 0.5 
 // with nothing to aim at, and searches by nosing upstream into the flow, which is how
 // fish actually use odour (Gardiner & Atema 2007, doi:10.1242/jeb.000075).
 const FEED = {
-  sight: 2.6,
+  sight: 3.4,
   near: 0.8,
-  rate: 4.0,
-  splash: 4.6,
+  rate: 6.0,
+  splash: 8.5,
   splashLatency: [0.13, 0.24],
   splashError: 0.61,
-  splashChance: 0.7,
+  splashChance: 0.95,
   rise: [4.8, 3.6],
   scan: [0.3, 0.5],
   plumeWidth: 1.6,
   plumeLife: 50,
   sniff: 9,
-  splashDrive: 0.4,
+  splashDrive: 0.7,
   sightDrive: 0.6,
   odourDrive: 0.5,
   recruitDrive: 0.5,
@@ -249,7 +283,7 @@ const FORAGE = {
   bowWave: 0.55,
   bowReach: 1.0,
   pursuit: 6,
-  hurry: 0.3,
+  hurry: 0.9,
 };
 // Suction has almost no reach. The flow a suction feeder generates is confined to about
 // one gape ahead of its mouth and is under 5% of the mouth speed at that distance (Day et
@@ -422,6 +456,28 @@ export function createFishSchool(
   let selectionBox = null;
   let playMode = false;
   let isHerding = false;
+  // A drag is often over long before the fish have caught up with it, so a group that has
+  // been let go of is still delivered to where it was put down.
+  let delivering = false;
+  let deliverUntil = 0;
+  const carrying = () => isHerding || delivering;
+  // A drag in progress: "select" draws a marquee, "herd" carries the selection with it.
+  let gesture = null;
+  let holdUntil = -Infinity;
+  // A marquee let go of before any frame saw its final size is still applied once.
+  let releaseBox = false;
+  // Where the dragged group is being taken. With screen coordinates it is the cursor's ray
+  // cut at the depth the group was picked up at; without them (older hosts) it is the
+  // pointer.
+  let herdFromPointer = true;
+  let herdDepth = 1;
+  const herdTarget = new THREE.Vector3();
+  const herdOffset = new THREE.Vector3();
+  const herdVelocity = new THREE.Vector3();
+  const lastHerdTarget = new THREE.Vector3();
+  const screenRay = new THREE.Raycaster();
+  const screenPoint = new THREE.Vector2();
+  const depthPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   const tempProj = new THREE.Vector3();
   const random = randomGenerator(583137);
   const range = (min, max) => min + random() * (max - min);
@@ -569,6 +625,15 @@ export function createFishSchool(
       recruitAt: 0,
       highlight: 0,
       wasSelected: false,
+      // Following the drag or the cursor: the place in the formation this fish is making
+      // for, and when a curious fish will notice the cursor.
+      slot: new THREE.Vector3(),
+      noticeAt: 0,
+      // How pressed a shy fish feels by the cursor, fading over SHY.calm seconds.
+      wary: 0,
+      nextFlee: 0,
+      // A fish dropped in by hand grows from a speck over its first moments.
+      grow: 1,
     };
   }
   bodies.count = membranes.count = fish.length;
@@ -603,9 +668,11 @@ export function createFishSchool(
   // that wants to point upstream has to ask rather than assume. Kept apart from `water`,
   // which holds a velocity the swimming code subtracts off.
   const downstream = new THREE.Vector3();
-  const curiousTarget = new THREE.Vector3();
+  const followFocus = new THREE.Vector3();
+  const followVelocity = new THREE.Vector3();
   let behaviorMode = "shy";
   let pointerStillTime = 0;
+  let curiousInterest = 0;
 
   // Where the last few pinches of food hit the film, and how fast the water was moving
   // there. Every fish that felt one points at the same record rather than carrying its
@@ -989,11 +1056,15 @@ export function createFishSchool(
     out.y *= 0.3;
     if (out.lengthSq() < 1e-4) out.copy(f.heading).negate();
     rotateAboutY(out.normalize(), range(-0.7, 0.7));
+    return offTheGlass(f.position, out);
+  }
+
+  function offTheGlass(position, out) {
     for (const [axis, minimum, maximum] of [
       ["x", BOUNDS.minX, BOUNDS.maxX],
       ["z", BOUNDS.minZ, BOUNDS.maxZ],
     ]) {
-      const ahead = f.position[axis] + out[axis] * 2.2;
+      const ahead = position[axis] + out[axis] * 2.2;
       if (ahead < minimum + 0.5 || ahead > maximum - 0.5) out[axis] *= -0.25;
     }
     return out.normalize();
@@ -1058,87 +1129,207 @@ export function createFishSchool(
   function threat(f, pointer, dt) {
     target.subVectors(pointer.position, f.position);
     const d = target.length();
-    if (d > THREAT.range || d < 1e-3) return;
+    if (d < 1e-3) return;
     target.multiplyScalar(1 / d);
-    const seen = f.heading.dot(target) > SENSES.blindCosine;
-    // Closing speed over distance: the rate the object grows in the fish's eye.
-    const looming = -pointer.velocity.dot(target) / Math.max(d, 0.4);
-    const threshold = THREAT.looming * (1 + f.alarm);
-    if (
-      seen &&
-      looming > threshold &&
-      f.mode !== "escape" &&
-      !f.pendingEscape &&
-      elapsed >= f.refractoryUntil &&
-      random() < 1 - Math.exp(-dt * THREAT.rate * (looming / threshold - 1))
-    ) {
-      startEscape(f, escapeDirection(f, pointer.position, delta));
-      startled++;
-      return;
-    }
-
-    if (isHerding && f.highlight > 0 && f.mode !== "escape") {
-      const angle = (f.id * 137.5 * Math.PI) / 180;
-      const radius = 0.35 + 0.15 * (f.id % 5);
-      curiousTarget.set(
-        pointer.position.x + Math.cos(angle) * radius,
-        pointer.position.y - 0.2 - 0.1 * (f.id % 4),
-        pointer.position.z + Math.sin(angle) * radius,
-      );
-      clampToBox(curiousTarget, BOUNDS, 0.4);
-
-      delta.subVectors(curiousTarget, f.position);
-      const dist = delta.length();
-      if (dist > 1e-3) {
-        const arrival = Math.min(1.0, dist / 1.2);
-        const pull = SWIM.cruise * arrival * 2.2;
-        urge.addScaledVector(delta.normalize(), pull);
-        f.effort = Math.min(1.0, f.effort + dt * 2.5);
-        if (f.mode === "hover") {
-          f.anchor.lerp(curiousTarget, 1 - Math.exp(-dt * 2.0));
-          clampToBox(f.anchor, BOUNDS, 0.4);
-        }
-      }
-      return;
-    }
-
-    if (behaviorMode === "curious") {
-      const interest = pointerStillTime < 8.0 ? 1.0 : Math.max(0, 1 - (pointerStillTime - 8.0) / 3.0);
-      if (interest > 0 && f.mode !== "feed" && f.mode !== "escape") {
-        const angle = (f.id * 137.5 * Math.PI) / 180;
-        const radius = 0.9 + 0.35 * (f.id % 5);
-        curiousTarget.set(
-          pointer.position.x + Math.cos(angle) * radius,
-          pointer.position.y - 0.35 - 0.2 * (f.id % 4),
-          pointer.position.z + Math.sin(angle) * radius,
-        );
-        clampToBox(curiousTarget, BOUNDS, 0.5);
-
-        delta.subVectors(curiousTarget, f.position);
-        const dist = delta.length();
-        if (dist > 1e-3) {
-          const arrival = Math.min(1.0, dist / 2.0);
-          const pull = SWIM.cruise * arrival * 0.95 * interest;
-          urge.addScaledVector(delta.normalize(), pull);
-          if (f.mode === "hover") {
-            f.anchor.lerp(curiousTarget, 1 - Math.exp(-dt * 0.8 * interest));
-            clampToBox(f.anchor, BOUNDS, 0.5);
-          }
-        }
+    if (d < THREAT.range) {
+      const seen = f.heading.dot(target) > SENSES.blindCosine;
+      // Closing speed over distance: the rate the object grows in the fish's eye.
+      const looming = -pointer.velocity.dot(target) / Math.max(d, 0.4);
+      const threshold = THREAT.looming * (1 + f.alarm);
+      if (
+        seen &&
+        looming > threshold &&
+        f.mode !== "escape" &&
+        !f.pendingEscape &&
+        elapsed >= f.refractoryUntil &&
+        random() < 1 - Math.exp(-dt * THREAT.rate * (looming / threshold - 1))
+      ) {
+        startEscape(f, escapeDirection(f, pointer.position, delta));
+        startled++;
         return;
       }
     }
+    if (behaviorMode === "curious") attend(f, d);
+    else giveRoom(f, pointer, d, dt);
+  }
 
-    // Something merely close is given room, less and less as it becomes familiar.
-    const zone = THREAT.flightZone / (1 + f.alarm);
-    if (d < zone) {
-      f.alarm += dt * THREAT.familiarity;
-      target.y *= 0.4;
-      urge.addScaledVector(target, (-(zone - d) / zone) * SWIM.cruise * 0.9);
-      if (f.mode === "hover") {
-        f.anchor.addScaledVector(target, -(zone - d) * THREAT.giveWay * dt);
-        clampToBox(f.anchor, BOUNDS, 0.5);
+  // Curious: the whole tank is drawn to the cursor. Each fish notices it after a moment
+  // that grows with its distance, then swims into a ring around it and faces it. Food, a
+  // fright or a cursor left still for too long lets it go again.
+  function attend(f, d) {
+    const eager =
+      curiousInterest > 0 && f.mode !== "feed" && f.mode !== "escape" && f.keen < 0.3;
+    if (!eager) {
+      f.noticeAt = 0;
+      if (f.mode === "follow") settle(f);
+      return;
+    }
+    if (f.mode === "follow") return;
+    if (!f.noticeAt)
+      f.noticeAt = elapsed + range(FOLLOW.notice[0], FOLLOW.notice[1]) + d * FOLLOW.noticePerUnit;
+    else if (elapsed >= f.noticeAt) {
+      f.noticeAt = 0;
+      follow(f);
+    }
+  }
+
+  // Shy: a cursor is given room. Near and still, the fish only drift aside; moving, it
+  // pushes them out of its path, and past SHY.trigger a fish swims off, out of the way and
+  // quicker the harder it was pushed, instead of waiting to be startled.
+  function giveRoom(f, pointer, d, dt) {
+    const speed = Math.min(pointer.velocity.length(), 6);
+    const reach =
+      (SHY.radius * (1 + speed * SHY.reachGain)) / (1 + 0.15 * f.alarm);
+    if (d > reach) return;
+    const closeness = 1 - d / reach;
+    const pressure = closeness * (0.35 + speed * SHY.speedGain);
+    f.wary = Math.max(f.wary, Math.min(1, pressure));
+    f.alarm += dt * THREAT.familiarity;
+    // Away from the cursor, and a fish in front of a moving cursor also out to the side of
+    // its path, which is where a fish actually goes rather than straight ahead of it.
+    flight.copy(target).negate();
+    if (speed > 0.3) {
+      scan.copy(pointer.velocity).normalize();
+      if (flight.dot(scan) > 0) {
+        wash.copy(flight).addScaledVector(scan, -flight.dot(scan));
+        if (wash.lengthSq() > 1e-4) flight.addScaledVector(wash.normalize(), 0.8);
       }
+    }
+    flight.y *= 0.45;
+    if (flight.lengthSq() < 1e-4) flight.copy(f.heading).negate();
+    flight.normalize();
+    urge.addScaledVector(flight, pressure * SWIM.cruise * 1.6);
+    if (f.mode === "hover") {
+      f.anchor.addScaledVector(flight, closeness * THREAT.giveWay * dt);
+      clampToBox(f.anchor, BOUNDS, 0.5);
+    }
+    if (
+      pressure > SHY.trigger &&
+      elapsed >= f.nextFlee &&
+      f.mode !== "escape" &&
+      f.mode !== "feed" &&
+      (f.mode !== "travel" || delta.subVectors(f.goal, f.position).dot(flight) < 0.5)
+    ) {
+      f.nextFlee = elapsed + 0.45;
+      offTheGlass(f.position, flight);
+      scan
+        .copy(f.position)
+        .addScaledVector(flight, range(SHY.flee[0], SHY.flee[1]) * (0.7 + 0.3 * Math.min(1, pressure)));
+      f.interest = null;
+      travel(f, clampToBox(scan, BOUNDS, 0.6));
+    }
+  }
+
+  function follow(f) {
+    f.mode = "follow";
+    f.until = Infinity;
+    f.interest = null;
+    f.food = null;
+    f.strikeUntil = 0;
+    f.recruiter = null;
+  }
+
+  // A sunflower of slots in the plane facing the camera, so a group of any size opens out
+  // evenly around its centre, with a little depth between neighbours.
+  function placeSlot(out, centre, rank, ring, spacing, turn = 0) {
+    const angle = rank * 2.39996 + turn;
+    const radius = ring + spacing * Math.sqrt(rank);
+    out.set(
+      centre.x + Math.cos(angle) * radius,
+      centre.y + Math.sin(angle) * radius * 0.75,
+      centre.z + ((rank % 3) - 1) * 0.3,
+    );
+    return clampToBox(out, BOUNDS, 0.45);
+  }
+
+  // The cursor's ray, from CSS pixels in the page, cut at a depth in the tank.
+  function screenToTank(x, y, depth, out) {
+    if (!activeCamera) return null;
+    const w = typeof window !== "undefined" ? window.innerWidth : 1920;
+    const h = typeof window !== "undefined" ? window.innerHeight : 1080;
+    screenPoint.set((x / w) * 2 - 1, -(y / h) * 2 + 1);
+    screenRay.setFromCamera(screenPoint, activeCamera);
+    depthPlane.constant = -depth;
+    return screenRay.ray.intersectPlane(depthPlane, out);
+  }
+
+  function onScreen(f, out) {
+    tempProj.copy(f.position).project(activeCamera);
+    if (tempProj.z < -1 || tempProj.z > 1) return false;
+    const w = typeof window !== "undefined" ? window.innerWidth : 1920;
+    const h = typeof window !== "undefined" ? window.innerHeight : 1080;
+    out.set((tempProj.x * 0.5 + 0.5) * w, (-tempProj.y * 0.5 + 0.5) * h);
+    return true;
+  }
+
+  const selected = (f) => f.highlight > 0.05;
+  const holding = () => playMode || isHerding || gesture === "herd" || elapsed < holdUntil;
+
+  // A press lands on the held selection when it is near one of its fish on screen, or
+  // anywhere inside the patch of screen the group covers: fish move, and a press that
+  // just misses one should not throw the whole selection away.
+  function grabbable(x, y) {
+    if (!activeCamera || !holding()) return false;
+    const at = new THREE.Vector2();
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const f of fish) {
+      if (!selected(f) || !onScreen(f, at)) continue;
+      if (Math.hypot(at.x - x, at.y - y) < GRAB_RADIUS) return true;
+      minX = Math.min(minX, at.x); maxX = Math.max(maxX, at.x);
+      minY = Math.min(minY, at.y); maxY = Math.max(maxY, at.y);
+    }
+    const margin = GRAB_RADIUS * 0.5;
+    return x > minX - margin && x < maxX + margin && y > minY - margin && y < maxY + margin;
+  }
+
+  function beginHerd(x, y) {
+    let n = 0;
+    centroid.set(0, 0, 0);
+    for (const f of fish) if (selected(f)) { centroid.add(f.position); n++; }
+    if (!n) return false;
+    centroid.multiplyScalar(1 / n);
+    herdDepth = THREE.MathUtils.clamp(centroid.z, BOUNDS.minZ + 0.8, BOUNDS.maxZ - 0.6);
+    herdFromPointer = x === undefined || !screenToTank(x, y, herdDepth, herdTarget);
+    // The group keeps where it was relative to the grab, but no more than a body or so,
+    // so it comes to the cursor instead of trailing a screen away from it.
+    if (herdFromPointer) herdOffset.set(0, 0, 0);
+    else herdOffset.subVectors(centroid, herdTarget).clampLength(0, 0.5);
+    if (!herdFromPointer) herdTarget.add(herdOffset);
+    lastHerdTarget.copy(herdTarget);
+    herdVelocity.set(0, 0, 0);
+    isHerding = true;
+    delivering = false;
+    return true;
+  }
+
+  function aimHerd(x, y) {
+    if (herdFromPointer || !screenToTank(x, y, herdDepth, herdTarget)) return;
+    herdTarget.add(herdOffset);
+    clampToBox(herdTarget, BOUNDS, 0.6);
+  }
+
+  // Let go: the group swims on to where it was put down and stays selected, so it can be
+  // picked up again.
+  function releaseHerd() {
+    isHerding = false;
+    holdUntil = elapsed + SELECTION_HOLD;
+    delivering = true;
+    deliverUntil = elapsed + FOLLOW.deliver;
+  }
+
+  function endDelivery() {
+    delivering = false;
+    for (const f of fish) if (f.mode === "follow" && selected(f)) settle(f);
+  }
+
+  function clearSelection() {
+    if (delivering) endDelivery();
+    selectionBox = null;
+    releaseBox = false;
+    holdUntil = -Infinity;
+    for (const f of fish) {
+      f.highlight = 0;
+      f.wasSelected = false;
     }
   }
 
@@ -1168,16 +1359,19 @@ export function createFishSchool(
     dt = Math.min(Math.max(dt, 0), 0.05);
     elapsed += dt;
     waterClock = time;
+    // Any real movement makes the cursor interesting again at once; only a cursor left
+    // alone for a while is lost interest in.
     if (pointer) {
       const speed = pointer.velocity ? pointer.velocity.length() : (pointer.speed || 0);
-      if (speed < 0.15) {
-        pointerStillTime += dt;
-      } else {
-        pointerStillTime = Math.max(0, pointerStillTime - dt * 2);
-      }
+      if (speed < 0.3) pointerStillTime += dt;
+      else pointerStillTime = 0;
     } else {
       pointerStillTime = 0;
     }
+    curiousInterest =
+      behaviorMode === "curious" && pointer
+        ? 1 - THREE.MathUtils.clamp((pointerStillTime - FOLLOW.bored) / FOLLOW.boredFade, 0, 1)
+        : 0;
     if (selectionBox && activeCamera) {
       const minX = Math.min(selectionBox.x0, selectionBox.x1);
       const maxX = Math.max(selectionBox.x0, selectionBox.x1);
@@ -1206,15 +1400,38 @@ export function createFishSchool(
         }
       }
     } else {
+      // A finished selection is held -- for as long as play mode lasts, while it is being
+      // dragged, and for SELECTION_HOLD after -- and then fades.
+      const held = holding();
       for (const f of fish) {
         f.wasSelected = false;
-        if (playMode && f.highlight > 0.05 && !isHerding) {
-          f.highlight = 1.0;
-        } else if (f.highlight > 0) {
-          f.highlight = Math.max(0, f.highlight - dt / 3.0);
-        }
+        if (held && f.highlight > 0.05) f.highlight = 1.0;
+        else if (f.highlight > 0) f.highlight = Math.max(0, f.highlight - dt / SELECTION_FADE);
       }
     }
+    if (releaseBox) {
+      releaseBox = false;
+      selectionBox = null;
+      holdUntil = elapsed + SELECTION_HOLD;
+    }
+    if (isHerding) {
+      if (herdFromPointer && pointer) herdTarget.copy(pointer.position);
+      clampToBox(herdTarget, BOUNDS, 0.6);
+      if (dt > 0) {
+        delta.subVectors(herdTarget, lastHerdTarget).multiplyScalar(1 / dt);
+        herdVelocity.lerp(delta.clampLength(0, 4), 1 - Math.exp(-dt * 8));
+      }
+      lastHerdTarget.copy(herdTarget);
+    } else if (delivering) {
+      herdVelocity.multiplyScalar(Math.exp(-dt * 4));
+      let off = 0, n = 0;
+      for (const f of fish)
+        if (f.mode === "follow" && selected(f)) { off += f.position.distanceTo(f.slot); n++; }
+      if (!n || elapsed > deliverUntil || off / n < FOLLOW.arrived) endDelivery();
+    }
+    // Places in the two formations are handed out in fish order each frame.
+    let herdRank = 0;
+    let gazeRank = 0;
     // A pellet touching the film is the loudest thing that happens in a quiet tank, and
     // the first thing anyone notices: heads turn across the near half of the water before
     // a single fish has swum anywhere. Every pellet that has entered the water since the
@@ -1232,6 +1449,7 @@ export function createFishSchool(
         splash.speed = wash.length();
         for (const f of fish) {
           if (f.splashAt || f.mode === "escape" || f.mode === "feed") continue;
+          if (carrying() && selected(f)) continue;
           const d = f.position.distanceTo(splash.point);
           if (d > FEED.splash) continue;
           f.splashSlot = slot;
@@ -1255,6 +1473,9 @@ export function createFishSchool(
         startEscape(f, direction);
       }
       f.alarm *= Math.exp(-dt / THREAT.habituation);
+      f.wary *= Math.exp(-dt / SHY.calm);
+      if (f.grow < 1) f.grow = Math.min(1, f.grow + dt / 0.45);
+      const herded = carrying() && selected(f);
       // Interest in food runs down on two clocks at once and appetite comes back slowly.
       // Both are left exactly zero when there is nothing left of them, so a tank that has
       // never been fed carries none of this.
@@ -1345,11 +1566,31 @@ export function createFishSchool(
               away,
           );
       }
-      if (pointer) threat(f, pointer, dt);
+      // A fish being dragged goes where it is taken; the cursor's pull and the food wait.
+      if (herded) {
+        if (f.mode !== "follow" && f.mode !== "escape") follow(f);
+      } else if (pointer) threat(f, pointer, dt);
+      else if (f.mode === "follow") settle(f);
+      if (f.mode === "follow") {
+        if (herded) {
+          placeSlot(f.slot, herdTarget, herdRank++, FOLLOW.herdRing, FOLLOW.herdSpacing);
+          followFocus.copy(herdTarget);
+          followVelocity.copy(herdVelocity);
+        } else {
+          // The ring around the cursor sits a little behind it and turns slowly, so the
+          // crowd keeps milling rather than setting into a pattern.
+          followFocus.copy(pointer.position);
+          followFocus.z -= 0.55;
+          placeSlot(f.slot, followFocus, gazeRank++, FOLLOW.ring, FOLLOW.spacing, elapsed * 0.12);
+          f.slot.y += Math.sin(elapsed * 0.8 + f.seed) * 0.08;
+          followFocus.copy(pointer.position);
+          followVelocity.copy(pointer.velocity).clampLength(0, 2.2).multiplyScalar(0.6);
+        }
+      }
       // Food is sensed after the pointer, so a fish that has just been startled is
       // already out of feeding by the time it is asked whether it can see a pellet.
       let foodDistance = Infinity;
-      if (food) {
+      if (food && !herded) {
         senseFood(f, dt, informer);
         if (f.mode === "feed") {
           // A fish eats with its snout, and at these distances the difference between its
@@ -1367,11 +1608,6 @@ export function createFishSchool(
       }
 
       if (elapsed >= f.until) decide(f);
-      if (behaviorMode === "curious" && pointer && pointerStillTime > 1.0 && f.mode === "travel") {
-        if (f.position.distanceTo(pointer.position) < 2.5 && random() < dt * 0.8) {
-          settle(f);
-        }
-      }
       if (f.mode !== "inspect" && f.mode !== "feed")
         f.curiosity = Math.min(1, f.curiosity + dt * 0.012 * f.character);
       const mayFlick = !f.flick && elapsed > f.lastFlick + 0.6;
@@ -1382,26 +1618,27 @@ export function createFishSchool(
         const splash = splashes[f.splashSlot];
         f.splashAt = 0;
         rouse(f, FEED.splashDrive);
-        if (mayFlick && f.mode !== "escape" && f.mode !== "feed") {
+        if (f.mode !== "escape" && f.mode !== "feed" && !herded) {
           scan.subVectors(splash.point, position);
           const reach = Math.max(scan.length(), 1e-4);
           const angle = wrap(
             yawOf(scan) + range(-FEED.splashError, FEED.splashError) - yawOf(heading),
           );
-          startFlick(
-            f,
-            angle,
-            twitchProfile(angle),
-            Math.asin(THREE.MathUtils.clamp(scan.y / reach, -0.5, 0.5)),
-          );
+          if (mayFlick)
+            startFlick(
+              f,
+              angle,
+              twitchProfile(angle),
+              Math.asin(THREE.MathUtils.clamp(scan.y / reach, -0.5, 0.5)),
+            );
           // Some of them go and look. A pellet a body length across is invisible from
           // most of the tank, so a fish that only turned its head would never find one:
           // what the lateral line buys is a reason to swim up to where it can see. The
           // nearer the splash, the more likely the fish is to bother.
           if (
-            !f.interest &&
-            random() < FEED.splashChance * f.appetite * (1 - (0.6 * reach) / FEED.splash)
+            random() < FEED.splashChance * f.appetite * (1 - (0.4 * reach) / FEED.splash)
           ) {
+            f.interest = null;
             scan
               .copy(splash.point)
               .add(wash.set(range(-0.9, 0.9), range(-0.5, 0.15), range(-0.7, 0.7)));
@@ -1495,9 +1732,19 @@ export function createFishSchool(
           const speed =
             SWIM.cruise * f.character * (bed ? 0.72 : 1) *
             (1 + FORAGE.hurry * f.keen) *
+            (1 + SHY.hurry * f.wary) *
             (f.interest ? Math.min(1, 0.25 + remaining / 1.2) : 1);
           desired.multiplyScalar(speed / remaining);
         } else desired.set(0, 0, 0);
+      } else if (mode === "follow") {
+        // Straight for its place, easing in over the last stretch, and carried along with
+        // the place itself once it gets there.
+        desired.subVectors(f.slot, position);
+        const remaining = desired.length();
+        const top = (herded ? FOLLOW.herdSpeed : FOLLOW.curiousSpeed) * f.character;
+        if (remaining > 1e-4)
+          desired.multiplyScalar(Math.min(top, remaining * FOLLOW.gain) / remaining);
+        desired.add(followVelocity);
       } else if (mode === "feed") {
         const length = STANDARD_LENGTH * f.scale;
         // How much faster than a stalk this fish arrived, which is what spoils its aim
@@ -1577,7 +1824,7 @@ export function createFishSchool(
       } else desired.set(0, 0, 0);
       desired.add(avoid).sub(water);
       desired.addScaledVector(separation, SHOAL.separation * (1 - 0.4 * f.keen));
-      if (isHerding && f.highlight > 0) desired.addScaledVector(urge, 1.8);
+      if (f.mode === "follow") desired.addScaledVector(urge, herded ? 0.1 : 0.35);
       else if (f.mode === "travel") desired.add(urge);
       else if (f.mode === "hover") desired.addScaledVector(urge, 0.5);
       // A feeding fish ignores the shoal, but not something that has come too close: the
@@ -1630,6 +1877,11 @@ export function createFishSchool(
           // that is aimed, for the same reason the strike is.
           target.copy(morsel).sub(position).normalize();
           steer = true;
+        } else if (f.mode === "follow" && wanted < 0.3) {
+          // Arrived: it turns to look at whatever it is gathered round.
+          target.subVectors(followFocus, position);
+          steer = target.lengthSq() > 0.04;
+          if (steer) target.normalize();
         } else if (f.mode === "settle") {
           target.copy(heading).setY(0).normalize();
           steer = true;
@@ -1647,7 +1899,9 @@ export function createFishSchool(
               ? TURN.hoverRate
               : f.mode === "escape"
                 ? 5
-                : Math.min(
+                : f.mode === "follow"
+                  ? TURN.feedRate
+                  : Math.min(
                     f.mode === "feed" ? TURN.feedRate : TURN.maximumRate,
                     TURN.floorRate + swim.length() * TURN.speedRate,
                   );
@@ -1702,7 +1956,10 @@ export function createFishSchool(
           swim.dot(heading) < desired.dot(heading) * GAIT.restartSpeed
         ) {
           const beats =
-            (f.mode === "travel" || f.mode === "feed") && wanted > SWIM.cruise ? 2 : 1;
+            (f.mode === "travel" || f.mode === "feed" || f.mode === "follow") &&
+            wanted > SWIM.cruise
+              ? 2
+              : 1;
           f.stroke = {
             start: elapsed,
             end: elapsed + beats / frequency,
@@ -1763,7 +2020,9 @@ export function createFishSchool(
                 : 0
               : f.mode === "hover" && !flick
                 ? 0.25
-                : 0;
+                : f.mode === "follow" && wanted < 0.3
+                  ? 0.6
+                  : 0;
       f.finBrake = THREE.MathUtils.lerp(f.finBrake, pectorals, 1 - Math.exp(-dt * 6));
       if (f.stroke || flick) f.phase = (f.phase + dt * TAU * frequency) % TAU;
       f.finPhase = (f.finPhase + dt * TAU * (2.1 + f.effort * 1.5)) % TAU;
@@ -1787,7 +2046,7 @@ export function createFishSchool(
       );
       targetQuaternion.multiply(bankQuaternion);
       f.quaternion.copy(targetQuaternion);
-      scale.setScalar(f.scale);
+      scale.setScalar(f.scale * f.grow);
       instance.compose(position, f.quaternion, scale);
       bodies.setMatrixAt(f.id, instance);
       membranes.setMatrixAt(f.id, instance);
@@ -1801,23 +2060,45 @@ export function createFishSchool(
 
   for (const f of fish) if (f.id % 4 !== 0) leave(f);
   update(0, 0, null);
+  const spawnAt = new THREE.Vector3();
   return {
     update,
     fish,
-    // One more fish, swimming in from a side of the tank to join the others. False once
-    // ADD_LIMIT have been added.
-    addFish() {
+    // One more fish, up to ADD_LIMIT above the stocked shoal. Given a point on the page (CSS
+    // pixels) it appears there, somewhere along that line of sight in the open water, and
+    // grows in from a speck; without one it swims in from a side of the tank.
+    addFish(x, y) {
       if (fish.length >= count + ADD_LIMIT) return false;
-      const side = random() < 0.5 ? -1 : 1;
-      const position = new THREE.Vector3(side * (BOUNDS.maxX - 0.4), range(2.6, 5.6), range(0.5, 2.6));
-      const heading = new THREE.Vector3(-side, range(-0.04, 0.04), range(-0.12, 0.12)).normalize();
-      const f = createFish(fish.length, position, heading);
-      f.swim.copy(heading).multiplyScalar(0.12);
-      fish.push(f);
+      let f;
+      if (
+        x !== undefined &&
+        y !== undefined &&
+        screenToTank(x, y, range(-0.8, 2.4), spawnAt)
+      ) {
+        clampToBox(spawnAt, BOUNDS, 0.45);
+        spawnAt.y = Math.max(
+          spawnAt.y,
+          groundHeight(spawnAt.x, spawnAt.z) + GROUND_CLEARANCE + 0.3,
+        );
+        const yaw = range(0, TAU);
+        const heading = new THREE.Vector3(Math.cos(yaw), range(-0.05, 0.05), Math.sin(yaw)).normalize();
+        f = createFish(fish.length, spawnAt.clone(), heading);
+        f.grow = 0.15;
+        f.swim.copy(heading).multiplyScalar(0.35);
+        fish.push(f);
+        settle(f);
+      } else {
+        const side = random() < 0.5 ? -1 : 1;
+        const position = new THREE.Vector3(side * (BOUNDS.maxX - 0.4), range(2.6, 5.6), range(0.5, 2.6));
+        const heading = new THREE.Vector3(-side, range(-0.04, 0.04), range(-0.12, 0.12)).normalize();
+        f = createFish(fish.length, position, heading);
+        f.swim.copy(heading).multiplyScalar(0.12);
+        fish.push(f);
+        target.set(-side * range(1, 4.5), range(2.8, 5.2), range(0.6, 2.4));
+        clampToBox(target, BOUNDS, 0.45);
+        travel(f, target, false);
+      }
       bodies.count = membranes.count = fish.length;
-      target.set(-side * range(1, 4.5), range(2.8, 5.2), range(0.6, 2.4));
-      clampToBox(target, BOUNDS, 0.45);
-      travel(f, target, false);
       return true;
     },
     setMode(value) {
@@ -1826,54 +2107,75 @@ export function createFishSchool(
     get mode() {
       return behaviorMode;
     },
+    // A drag on the page, in CSS pixels from where it started (x0, y0) to where it is now.
+    // It begins on the held selection and carries it, or anywhere else and draws a new
+    // marquee; the answer says which, so a host can draw its own box.
+    drag({ phase, x0, y0, x, y } = {}) {
+      if (phase === "start") {
+        if (gesture) this.drag({ phase: "cancel" });
+        if (grabbable(x0, y0) && beginHerd(x0, y0)) {
+          gesture = "herd";
+          aimHerd(x, y);
+        } else {
+          gesture = "select";
+          clearSelection();
+          selectionBox = { x0, y0, x1: x, y1: y };
+        }
+        return gesture;
+      }
+      if (!gesture) return "none";
+      const was = gesture;
+      if (phase === "move") {
+        if (gesture === "herd") aimHerd(x, y);
+        else selectionBox = { x0, y0, x1: x, y1: y };
+        return gesture;
+      }
+      gesture = null;
+      if (was === "herd") releaseHerd();
+      else if (phase === "end") {
+        selectionBox = { x0, y0, x1: x, y1: y };
+        releaseBox = true;
+        holdUntil = elapsed + SELECTION_HOLD;
+      } else clearSelection();
+      return was;
+    },
     setSelection(box) {
       if (box === 'clear') {
-        selectionBox = null;
-        for (const f of fish) {
-          f.highlight = 0;
-          f.wasSelected = false;
-        }
+        clearSelection();
         return;
       }
+      if (!box && selectionBox) holdUntil = elapsed + SELECTION_HOLD;
       selectionBox = box;
     },
     setPlayMode(active) {
       playMode = Boolean(active);
       if (!playMode) {
-        isHerding = false;
-        for (const f of fish) {
-          f.highlight = 0;
-          f.wasSelected = false;
-        }
+        if (isHerding) releaseHerd();
+        gesture = null;
+        clearSelection();
       }
     },
+    // The older host call: herd toward { x, y } in CSS pixels when given, otherwise toward
+    // the pointer.
     setHerd(state) {
       const next = typeof state === 'object' && state !== null ? Boolean(state.active) : Boolean(state);
-      if (isHerding && !next) {
-        for (const f of fish) {
-          if (f.highlight > 0) {
-            const scatterAngle = (random() - 0.5) * Math.PI * 0.9;
-            startFlick(f, scatterAngle, twitchProfile(scatterAngle));
-            f.velocity.add(new THREE.Vector3(
-              (random() - 0.5) * 2.8,
-              (random() - 0.5) * 1.5,
-              (random() - 0.5) * 2.8
-            ));
-            f.highlight = 0;
-            f.wasSelected = false;
-          }
-        }
-      }
-      isHerding = next;
+      const hasPoint =
+        typeof state === 'object' && state !== null && Number.isFinite(state.x) && Number.isFinite(state.y);
+      if (next && !isHerding) beginHerd(hasPoint ? state.x : undefined, hasPoint ? state.y : undefined);
+      else if (next && hasPoint) aimHerd(state.x, state.y);
+      else if (!next && isHerding) releaseHerd();
     },
     setCamera(cam) {
       activeCamera = cam;
     },
     get selectedFish() {
-      return fish.filter((f) => f.highlight > 0.05).map((f) => f.id);
+      return fish.filter(selected).map((f) => f.id);
+    },
+    get herding() {
+      return isHerding;
     },
     getTelemetry() {
-      const states = { hover: 0, travel: 0, settle: 0, inspect: 0, feed: 0, escape: 0 };
+      const states = { hover: 0, travel: 0, settle: 0, inspect: 0, feed: 0, escape: 0, follow: 0 };
       let twitching = 0,
         totalSpeed = 0,
         maximumSpeed = 0,

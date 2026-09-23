@@ -9,7 +9,10 @@ export function createComposite(camera, settings) {
       bool finite(vec3 c){return !any(isnan(c))&&!any(isinf(c));}
       float safeLuma(vec3 c){return finite(c)?luma(c):0.;}
       void main(){
+        // Light is never negative. A negative colour here is a shading fault upstream, and
+        // the tone curve would show it as a white speck, so it is floored before anything else.
         vec3 color=texture2D(beauty,vUv).rgb;
+        if(finite(color))color=max(color,0.);
         // Fireflies: a needle tip or leaf edge far thinner than a pixel can catch a highlight
         // bright enough that one multisample of it outweighs the rest of the pixel, and as the
         // plants sway those lone pixels flicker on and off all over the planting (a few go
@@ -18,8 +21,8 @@ export function createComposite(camera, settings) {
         // or dark, keeps neighbours like itself along its length and is left alone. Shading
         // that went NaN or infinite upstream is replaced the same way.
         vec2 texel=1./size;
-        vec3 right=texture2D(beauty,vUv+vec2(texel.x,0.)).rgb,left=texture2D(beauty,vUv-vec2(texel.x,0.)).rgb;
-        vec3 up=texture2D(beauty,vUv+vec2(0.,texel.y)).rgb,down=texture2D(beauty,vUv-vec2(0.,texel.y)).rgb;
+        vec3 right=max(texture2D(beauty,vUv+vec2(texel.x,0.)).rgb,0.),left=max(texture2D(beauty,vUv-vec2(texel.x,0.)).rgb,0.);
+        vec3 up=max(texture2D(beauty,vUv+vec2(0.,texel.y)).rgb,0.),down=max(texture2D(beauty,vUv-vec2(0.,texel.y)).rgb,0.);
         vec4 around=vec4(safeLuma(right),safeLuma(left),safeLuma(up),safeLuma(down));
         float highest=max(max(around.x,around.y),max(around.z,around.w)),lowest=min(min(around.x,around.y),min(around.z,around.w));
         float bright=luma(color);

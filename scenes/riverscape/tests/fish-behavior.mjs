@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 register("./three-loader.mjs", import.meta.url);
 const THREE = await import("three");
-const { BOUNDS, COUNT, createFishSchool } = await import("../src/fish.js");
+const { BOUNDS, COUNT, SELECTION_HOLD, createFishSchool } = await import("../src/fish.js");
 const { createFood } = await import("../src/food.js");
 const { shelteredVelocity } = await import("../src/water.js");
 const { THICKETS } = await import("../src/plants.js");
@@ -320,8 +320,8 @@ assert.ok(
 );
 const times = [...arrivals.values()].sort((a, b) => a - b);
 assert.ok(
-  arrivals.size > 3 && arrivals.size < COUNT,
-  `Food should draw much of the shoal, but not telepathically all of it (got ${arrivals.size})`,
+  arrivals.size > COUNT / 2,
+  `Food should draw most of the shoal (got ${arrivals.size} of ${COUNT})`,
 );
 assert.ok(
   times[times.length - 1] - times[0] > 3,
@@ -437,6 +437,46 @@ for (let i = 0; i < 60; i++) {
 assert.ok(curiousStartled, "A fast lunge must still startle fish in curious mode");
 curiousSchool.dispose();
 
+// Curious reaches the whole tank: a cursor at one end draws fish from the other, loses
+// them only once it has sat still for a while, and gets them back as soon as it moves.
+const drawn = createFishSchool(new THREE.Scene(), { thickets: THICKETS });
+drawn.setMode("curious");
+for (let i = 0; i < 300; i++) drawn.update(STEP, i * STEP, null);
+const farCursor = { position: new THREE.Vector3(-5, 5, 2.6), velocity: new THREE.Vector3() };
+for (let i = 0; i < 60 * 9; i++) drawn.update(STEP, 5 + i * STEP, farCursor);
+const gathered = drawn.fish.filter((f) => f.position.distanceTo(farCursor.position) < 3).length;
+assert.ok(gathered > COUNT * 0.7, `A curious tank must gather at the cursor (${gathered} of ${COUNT})`);
+for (let i = 0; i < 60 * 12; i++) drawn.update(STEP, 14 + i * STEP, farCursor);
+assert.strictEqual(drawn.getTelemetry().states.follow, 0, "A cursor left still long enough is lost interest in");
+farCursor.velocity.set(1, 0, 0);
+drawn.update(STEP, 27, farCursor);
+farCursor.velocity.set(0, 0, 0);
+for (let i = 0; i < 60 * 3; i++) drawn.update(STEP, 27 + i * STEP, farCursor);
+assert.ok(drawn.getTelemetry().states.follow > COUNT / 2, "Moving the cursor again wins the tank back");
+drawn.dispose();
+
+// Shy fish are swept aside by a cursor crossing the tank at a brisk pace: they swim out of
+// its path in time rather than waiting to be startled.
+const swept = createFishSchool(new THREE.Scene(), { thickets: THICKETS });
+for (let i = 0; i < 600; i++) swept.update(STEP, i * STEP, null);
+const sweep = { position: new THREE.Vector3(-8, 4.2, 2.6), velocity: new THREE.Vector3(3, 0, 0) };
+const sweptBefore = swept.getTelemetry();
+let sweptClosest = Infinity, pushed = 0;
+for (let i = 0; i < 60 * 6; i++) {
+  sweep.position.x = -8 + (3 * i) / 60;
+  swept.update(STEP, 10 + i * STEP, sweep);
+  for (const f of swept.fish) sweptClosest = Math.min(sweptClosest, f.position.distanceTo(sweep.position));
+  pushed = Math.max(pushed, swept.fish.filter((f) => f.wary > 0.2).length);
+}
+assert.ok(sweptClosest > 0.9, `Shy fish must get out of the cursor's way (closest ${sweptClosest.toFixed(2)})`);
+assert.ok(pushed > 0, "A passing cursor must push some fish aside");
+assert.strictEqual(
+  swept.getTelemetry().pointerResponses - sweptBefore.pointerResponses,
+  0,
+  "A cursor at a brisk but steady pace moves fish aside without startling them",
+);
+swept.dispose();
+
 // Drag selection test: fish projected inside selection box highlight and flick; highlight fades over ~3s when released.
 const selectTank = new THREE.Scene();
 const selectCamera = new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 100);
@@ -462,26 +502,104 @@ for (const id of selectedIds) {
   assert.ok(selectSchool.fish[id].wasSelected, `Selected fish ${id} wasSelected should be true`);
 }
 
-// Release selection box: highlight should linger and fade over ~3s
+// Release selection box: the selection is held so it can be picked up, then fades.
 selectSchool.setSelection(null);
 for (let i = 0; i < 60; i++) {
   selectSchool.update(STEP, 1.0 + i * STEP, null);
 }
 for (const id of selectedIds) {
-  assert.ok(
-    selectSchool.fish[id].highlight > 0 && selectSchool.fish[id].highlight < 1.0,
-    `Highlight should be fading after 1s (got ${selectSchool.fish[id].highlight.toFixed(3)})`
-  );
+  assert.strictEqual(selectSchool.fish[id].highlight, 1.0, "A finished selection must be held");
 }
-
-// After 3.5 total seconds (210 frames total), highlight should reach 0
-for (let i = 0; i < 160; i++) {
+const holdFrames = Math.round((SELECTION_HOLD + 2) / STEP);
+for (let i = 0; i < holdFrames; i++) {
   selectSchool.update(STEP, 2.0 + i * STEP, null);
 }
 for (const id of selectedIds) {
-  assert.strictEqual(selectSchool.fish[id].highlight, 0, `Highlight should fade to 0 after ~3s`);
+  assert.strictEqual(selectSchool.fish[id].highlight, 0, "The held selection must fade once the hold is over");
 }
+
+// Drag gesture: a marquee selects, a drag starting on a selected fish carries the group to
+// the cursor, and letting go leaves it selected so it can be picked up again.
+const project = (f) => {
+  const p = f.position.clone().project(selectCamera);
+  return { x: (p.x * 0.5 + 0.5) * 1920, y: (-p.y * 0.5 + 0.5) * 1080 };
+};
+assert.strictEqual(
+  selectSchool.drag({ phase: "start", x0: 0, y0: 0, x: 10, y: 10 }),
+  "select",
+  "A drag away from any selection draws a marquee",
+);
+selectSchool.drag({ phase: "move", x0: 0, y0: 0, x: 1920, y: 1080 });
+selectSchool.update(STEP, 20, null);
+selectSchool.drag({ phase: "end", x0: 0, y0: 0, x: 1920, y: 1080 });
+const grabbed = selectSchool.selectedFish;
+assert.ok(grabbed.length > 0, "The marquee drag must select fish");
+const handle = project(selectSchool.fish[grabbed[0]]);
+assert.strictEqual(
+  selectSchool.drag({ phase: "start", x0: handle.x, y0: handle.y, x: handle.x, y: handle.y }),
+  "herd",
+  "A drag starting on a selected fish picks the group up",
+);
+const dropAt = { x: handle.x < 960 ? 1500 : 400, y: 380 };
+selectSchool.drag({ phase: "move", x0: handle.x, y0: handle.y, x: dropAt.x, y: dropAt.y });
+const groupScreenDistance = () =>
+  grabbed.reduce((sum, id) => {
+    const at = project(selectSchool.fish[id]);
+    return sum + Math.hypot(at.x - dropAt.x, at.y - dropAt.y);
+  }, 0) / grabbed.length;
+const draggedBefore = groupScreenDistance();
+for (let i = 0; i < 360; i++) selectSchool.update(STEP, 21 + i * STEP, null);
+const draggedAfter = groupScreenDistance();
+assert.ok(
+  draggedAfter < draggedBefore * 0.5,
+  `The dragged group must come to the cursor (${draggedBefore.toFixed(0)}px to ${draggedAfter.toFixed(0)}px)`,
+);
+for (const f of selectSchool.fish) assert.ok(insideTank(f.position), "A dragged fish must stay inside the tank");
+selectSchool.drag({ phase: "end", x0: handle.x, y0: handle.y, x: dropAt.x, y: dropAt.y });
+selectSchool.update(STEP, 28, null);
+assert.deepStrictEqual(selectSchool.selectedFish, grabbed, "Letting go keeps the group selected");
+for (let i = 1; i <= 480; i++) selectSchool.update(STEP, 28 + i * STEP, null);
+assert.ok(
+  selectSchool.fish.every((f) => f.mode !== "follow"),
+  "A group let go of settles once it has been delivered",
+);
 selectSchool.dispose();
+
+// A quick flick: let go almost at once, and the group still swims on to where it was put.
+const flickTank = new THREE.Scene();
+const flickSchool = createFishSchool(flickTank, { camera: selectCamera });
+const flickProject = (f) => {
+  const p = f.position.clone().project(selectCamera);
+  return { x: (p.x * 0.5 + 0.5) * 1920, y: (-p.y * 0.5 + 0.5) * 1080 };
+};
+flickSchool.update(STEP, 0, null);
+flickSchool.drag({ phase: "start", x0: 0, y0: 0, x: 10, y: 10 });
+flickSchool.drag({ phase: "end", x0: 0, y0: 0, x: 1920, y: 1080 });
+flickSchool.update(STEP, STEP, null);
+const flicked = flickSchool.selectedFish;
+assert.ok(flicked.length > 0, "The marquee must select fish");
+const flickHandle = flickProject(flickSchool.fish[flicked[0]]);
+assert.strictEqual(
+  flickSchool.drag({ phase: "start", x0: flickHandle.x, y0: flickHandle.y, x: flickHandle.x, y: flickHandle.y }),
+  "herd",
+);
+const flickTo = { x: flickHandle.x < 960 ? 1500 : 400, y: 380 };
+flickSchool.drag({ phase: "move", x0: flickHandle.x, y0: flickHandle.y, x: flickTo.x, y: flickTo.y });
+flickSchool.update(STEP, 2 * STEP, null);
+flickSchool.drag({ phase: "end", x0: flickHandle.x, y0: flickHandle.y, x: flickTo.x, y: flickTo.y });
+const flickDistance = () =>
+  flicked.reduce((sum, id) => {
+    const at = flickProject(flickSchool.fish[id]);
+    return sum + Math.hypot(at.x - flickTo.x, at.y - flickTo.y);
+  }, 0) / flicked.length;
+const flickBefore = flickDistance();
+for (let i = 0; i < 360; i++) flickSchool.update(STEP, (3 + i) * STEP, null);
+const flickAfter = flickDistance();
+assert.ok(
+  flickAfter < flickBefore * 0.5,
+  `A flicked group must still reach where it was let go (${flickBefore.toFixed(0)}px to ${flickAfter.toFixed(0)}px)`,
+);
+flickSchool.dispose();
 
 // Play Mode test: fish stay selected in play mode, follow cursor during herding, and scatter on release
 const playTank = new THREE.Scene();
@@ -534,17 +652,20 @@ assert.ok(
   `Herded fish should follow pointer (before: ${herdDistBefore.toFixed(2)}, after: ${herdDistAfter.toFixed(2)})`
 );
 
-// Release herding: fish must scatter and highlight reset to 0
+// Release herding: the group stays selected in play mode, ready to be picked up again
 playSchool.setHerd({ active: false });
 playSchool.update(STEP, 4.0, herdPointer);
 for (const id of herdedIds) {
-  assert.strictEqual(playSchool.fish[id].highlight, 0, "Herded fish highlight must reset to 0 upon release");
+  assert.strictEqual(playSchool.fish[id].highlight, 1.0, "Released fish stay selected in play mode");
 }
-assert.strictEqual(playSchool.selectedFish.length, 0, "No fish should remain selected after herd release");
+for (let i = 1; i <= 480; i++) playSchool.update(STEP, 4.0 + i * STEP, null);
+assert.ok(playSchool.fish.every((f) => f.mode !== "follow"), "A released herd settles once delivered");
+playSchool.setPlayMode(false);
+assert.strictEqual(playSchool.selectedFish.length, 0, "Leaving play mode clears the selection");
 
 playSchool.setPlayMode(false);
 playSchool.dispose();
 
 console.log(
-  `PASS: 120 simulated seconds; ${roaming}/${COUNT} fish explored all three dimensions; ${(gliding / travelling * 100).toFixed(0)}% of travel was quiet-tail gliding; calm tail beats at most ${peakBeatFrequency.toFixed(2)} Hz; ${visits} inspection frames; ${behind} fish-frames behind the grass; ${(rheotaxis * 100).toFixed(0)}% of hovering fish facing upstream; minimum sampled spacing ${minimumSpacing.toFixed(3)}; slow approach gave room (${before.toFixed(2)} to ${after.toFixed(2)}) without a startle; a lunge startled ${telemetry.pointerResponses} fish directly and ${telemetry.escapes} in all, peaking at ${peakSpeed.toFixed(2)} units per second; a pinch of ${PINCH} pellets drew ${arrivals.size} fish over ${(times[times.length - 1] - times[0]).toFixed(1)} seconds, ${feeding.bites} taken in ${feeding.strikes} strikes, crowding to ${crowding.toFixed(2)} at the food and opening back out to ${regrouped.toFixed(2)}; curious mode verified; selection box highlight, flick, and ~3s fade-out verified.`,
+  `PASS: 120 simulated seconds; ${roaming}/${COUNT} fish explored all three dimensions; ${(gliding / travelling * 100).toFixed(0)}% of travel was quiet-tail gliding; calm tail beats at most ${peakBeatFrequency.toFixed(2)} Hz; ${visits} inspection frames; ${behind} fish-frames behind the grass; ${(rheotaxis * 100).toFixed(0)}% of hovering fish facing upstream; minimum sampled spacing ${minimumSpacing.toFixed(3)}; slow approach gave room (${before.toFixed(2)} to ${after.toFixed(2)}) without a startle; a lunge startled ${telemetry.pointerResponses} fish directly and ${telemetry.escapes} in all, peaking at ${peakSpeed.toFixed(2)} units per second; a pinch of ${PINCH} pellets drew ${arrivals.size} fish over ${(times[times.length - 1] - times[0]).toFixed(1)} seconds, ${feeding.bites} taken in ${feeding.strikes} strikes, crowding to ${crowding.toFixed(2)} at the food and opening back out to ${regrouped.toFixed(2)}; curious mode verified; selection hold, fade and drag-to-move verified.`,
 );

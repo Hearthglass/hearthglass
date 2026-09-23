@@ -1182,7 +1182,7 @@ export function applySkin(shader) {
         * ${glsl(THROUGH.ambient)} * RECIPROCAL_PI;
       if (vHighlight > 0.0) {
         float fresnel = pow(1.0 - max(dot(geometryNormal, geometryViewDir), 0.0), 2.5);
-        reflectedLight.directDiffuse += vec3(0.15, 0.50, 0.65) * (vHighlight * fresnel * 1.8 + vHighlight * 0.15);
+        reflectedLight.directDiffuse += vec3(0.15, 0.50, 0.65) * (vHighlight * fresnel * 3.0 + vHighlight * 0.4);
       }
     `,
     );

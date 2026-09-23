@@ -39,6 +39,10 @@ public class MouseHookManager : IDisposable
 
     public bool IsInstalled => _hookThread != null;
 
+    // Adding fish by clicking: every click counts, quickly, double clicks included. Feeding
+    // keeps its cooldown so a burst of clicks does not flood the tank with pellets.
+    public bool RapidClicks { get; set; }
+
     public MouseHookManager(Func<IntPtr> defViewProvider)
     {
         _defViewProvider = defViewProvider;
@@ -205,6 +209,14 @@ public class MouseHookManager : IDisposable
 
     private void HandleClick(Point pt, long now)
     {
+        if (RapidClicks)
+        {
+            if (now - _lastFeedTime < 60) return;
+            _lastFeedTime = now;
+            OnEmptyDesktopClick?.Invoke(pt);
+            return;
+        }
+
         // Check for double click: within double click time and double click bounding box
         int ddx = pt.X - _lastClickPoint.X;
         int ddy = pt.Y - _lastClickPoint.Y;

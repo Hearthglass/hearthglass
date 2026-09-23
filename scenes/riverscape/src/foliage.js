@@ -80,12 +80,20 @@ export function foliageMaterial() {
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <color_fragment>",
       /* glsl */ `#include <color_fragment>
+      // With multisampling a pixel is shaded once, at its centre, whenever any of its
+      // samples touches the leaf. On a needle narrower than a pixel that centre lies off
+      // the leaf, so the leaf coordinate is extrapolated well outside 0..1, the edge term
+      // below grows to tens of thousands and the shaded colour goes hugely negative; tone
+      // mapping shows negative light as a white or yellow speck that hops about as the
+      // plants sway. The pattern is worked from the coordinate held on the leaf. Screen
+      // derivatives still use the raw one, which is the true rate across the pixel.
+      vec2 leafSurface = clamp(leafUv, 0.0, 1.0);
       // The midrib highlight fades once a leaf is only a few pixels wide, so needle
       // leaves do not clip to white specks.
-      float midrib = (1.0 - smoothstep(.008, .035, abs(leafUv.x - .5))) * (1.0 - smoothstep(.02, .06, fwidth(leafUv.x)));
-      float veins = pow(.5 + .5 * cos((leafUv.y - abs(leafUv.x - .5) * .32) * 155.0), 22.0);
-      float edge = pow(abs(leafUv.x - .5) * 2.0, 5.0);
-      float mottling = .965 + .035 * sin(leafUv.y * 64.0 + sin(leafUv.x * 25.0));
+      float midrib = (1.0 - smoothstep(.008, .035, abs(leafSurface.x - .5))) * (1.0 - smoothstep(.02, .06, fwidth(leafUv.x)));
+      float veins = pow(max(0.0, .5 + .5 * cos((leafSurface.y - abs(leafSurface.x - .5) * .32) * 155.0)), 22.0);
+      float edge = pow(abs(leafSurface.x - .5) * 2.0, 5.0);
+      float mottling = .965 + .035 * sin(leafSurface.y * 64.0 + sin(leafSurface.x * 25.0));
       diffuseColor.rgb *= mottling * (1.0 - .09 * edge + .12 * veins);
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.22 + vec3(.008,.012,0.), midrib * .6);
       // Leaf undersides are paler and warmer than the upper surface.
@@ -99,10 +107,10 @@ export function foliageMaterial() {
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <normal_fragment_maps>",
       /* glsl */ `#include <normal_fragment_maps>
-      float rib = exp(-pow((leafUv.x-.5)*60.,2.))*.0015;
-      float veinHeight = pow(.5+.5*cos((leafUv.y-abs(leafUv.x-.5)*.32)*155.),16.)*.00025;
+      float rib = exp(-pow((leafSurface.x-.5)*60.,2.))*.0015;
+      float veinHeight = pow(max(0.,.5+.5*cos((leafSurface.y-abs(leafSurface.x-.5)*.32)*155.)),16.)*.00025;
       float detailFade = 1.-smoothstep(.003,.012,max(fwidth(leafUv.x),fwidth(leafUv.y)));
-      float micro = sin(leafUv.x*230.)*sin(leafUv.y*310.)*.00003*detailFade;
+      float micro = sin(leafSurface.x*230.)*sin(leafSurface.y*310.)*.00003*detailFade;
       float surfaceHeight = rib + veinHeight + micro;
       vec3 dp1=dFdx(-vViewPosition),dp2=dFdy(-vViewPosition);
       vec3 r1=cross(dp2,normal),r2=cross(normal,dp1);
@@ -125,7 +133,7 @@ export function foliageMaterial() {
       `,
     });
   };
-  material.customProgramCacheKey = () => "aquatic-leaves-v2";
+  material.customProgramCacheKey = () => "aquatic-leaves-v3";
   return material;
 }
 

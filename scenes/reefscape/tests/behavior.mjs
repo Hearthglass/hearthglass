@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 register('../../riverscape/tests/three-loader.mjs', import.meta.url);
-const { ReefSimulation, FIXED_STEP, POPULATION, SHRIMP }=await import('../src/simulation.js');
+const { ReefSimulation, FIXED_STEP, POPULATION, SHRIMP, SELECTION_HOLD }=await import('../src/simulation.js');
 const { currentAt,responseAt,WAVES,SURFACE }=await import('../src/water.js');
 const { HOST }=await import('../src/terrain.js');
 const { Vector3, PerspectiveCamera }=await import('three');
@@ -84,7 +84,7 @@ const first=pod.filter(f=>f.alarm>0).length;
 assert.ok(first<pod.length,`A startle cannot reach a whole pod in one frame (${first}/${pod.length})`);
 for(let i=0;i<12;i++)wave.step(FIXED_STEP);
 assert.ok(pod.filter(f=>f.alarm>0).length>first,'A startle must keep spreading through the pod');
-const pool=new ReefSimulation();for(let i=0;i<30;i++){pool.lastFeed=-100;pool.feed(0,1);}assert.equal(pool.food.filter(p=>p.active).length,32);
+const pool=new ReefSimulation();for(let i=0;i<30;i++){pool.lastFeed=-100;pool.feed(0,1);}assert.equal(pool.food.filter(p=>p.active).length,pool.food.length);
 assert.equal(pool.feed(0,1),0,'Feed cooldown works');
 for(const t of [0,1,10,100,10000]){
  const v=currentAt(V(0,2,0),t,V());assert.ok(v.toArray().every(Number.isFinite));assert.ok(v.length()<1.8);
@@ -104,7 +104,32 @@ const lungePointer={position:curSim.fish[0].position.clone(),speed:2.5};
 curSim.step(FIXED_STEP,lungePointer);
 assert.equal(curSim.fish[0].state,'shelter','Lunge must trigger shelter even in curious mode');
 
-// Drag selection test
+// Curious reaches the whole reef: a still-new cursor at one end draws the open-water fish
+// from everywhere, and a cursor left still long enough is lost interest in.
+const farSim=new ReefSimulation(4321);farSim.setMode('curious');
+const farPointer={position:V(5,5,2.4),speed:0};
+for(let i=0;i<60*10;i++)farSim.step(FIXED_STEP,farPointer);
+const openFish=farSim.fish.filter(f=>f.kind!=='clown');
+const gatheredReef=openFish.filter(f=>f.position.distanceTo(farPointer.position)<3.5).length;
+assert.ok(gatheredReef>openFish.length*.6,`A curious reef must gather at the cursor (${gatheredReef} of ${openFish.length})`);
+for(let i=0;i<60*12;i++)farSim.step(FIXED_STEP,farPointer);
+assert.equal(farSim.fish.filter(f=>f.state==='curious').length,0,'A cursor left still is lost interest in');
+
+// Shy: a cursor crossing at a steady pace pushes fish aside without sending them to cover.
+const shySim=new ReefSimulation(2468);
+for(let i=0;i<300;i++)shySim.step(FIXED_STEP);
+let shyClosest=Infinity,shyPushed=0,shyCover=0;
+for(let i=0;i<60*6;i++){
+  const sweepPointer={position:V(-8+3*i/60,5.5,2.4),speed:1.5};
+  shySim.step(FIXED_STEP,sweepPointer);
+  for(const f of shySim.fish)if(f.kind!=='clown')shyClosest=Math.min(shyClosest,f.position.distanceTo(sweepPointer.position));
+  shyPushed=Math.max(shyPushed,shySim.fish.filter(f=>f.wary>.2).length);
+  shyCover+=shySim.fish.filter(f=>f.state==='shelter').length;
+}
+assert.ok(shyPushed>0,'A passing cursor must push some fish aside');
+assert.equal(shyCover,0,'A steady cursor moves fish aside without sending them to cover');
+
+// Drag selection: the finished marquee is held, then fades.
 const selSim=new ReefSimulation(5678);
 const selCamera=new PerspectiveCamera(36,16/9,0.08,140);
 selCamera.position.set(0,3,10);
@@ -119,16 +144,46 @@ for(const idx of selSim.selectedFish){
 }
 selSim.setSelection(null);
 for(let i=0;i<60;i++)selSim.step(FIXED_STEP);
-for(const idx of selSim.selectedFish){
-  assert.ok(selSim.fish[idx].highlight>0&&selSim.fish[idx].highlight<1.0,'Highlight should be fading after 1s');
-}
-for(let i=0;i<160;i++)selSim.step(FIXED_STEP);
-for(const f of selSim.fish){
-  assert.equal(f.highlight,0,'Highlight should fade to 0 after ~3s');
-}
-assert.equal(selSim.selectedFish.length,0,'No fish should remain selected after fade-out');
+for(const idx of selSim.selectedFish)assert.equal(selSim.fish[idx].highlight,1.0,'A finished selection must be held');
+for(let i=0;i<Math.round((SELECTION_HOLD+2)/FIXED_STEP);i++)selSim.step(FIXED_STEP);
+for(const f of selSim.fish)assert.equal(f.highlight,0,'The held selection fades once the hold is over');
 
-// Play Mode test: fish remain selected in play mode, herd to pointer, and scatter on release
+// Drag gesture: a marquee selects; a drag begun on a selected fish carries the group to
+// the cursor; letting go leaves it selected.
+const onScreen=f=>{const q=f.position.clone().project(selCamera);return {x:(q.x*.5+.5)*1920,y:(-q.y*.5+.5)*1080};};
+assert.equal(selSim.drag({phase:'start',x0:0,y0:0,x:5,y:5}),'select','A drag away from any selection draws a marquee');
+selSim.drag({phase:'move',x0:0,y0:0,x:1920,y:1080});selSim.step(FIXED_STEP);
+selSim.drag({phase:'end',x0:0,y0:0,x:1920,y:1080});
+const reefGrabbed=selSim.selectedFish;
+assert.ok(reefGrabbed.length>0,'The marquee drag must select fish');
+const reefHandle=onScreen(selSim.fish[reefGrabbed[0]]);
+assert.equal(selSim.drag({phase:'start',x0:reefHandle.x,y0:reefHandle.y,x:reefHandle.x,y:reefHandle.y}),'herd','A drag begun on a selected fish picks the group up');
+const reefDrop={x:reefHandle.x<960?1450:450,y:420};
+selSim.drag({phase:'move',x0:reefHandle.x,y0:reefHandle.y,x:reefDrop.x,y:reefDrop.y});
+const reefScreenDistance=()=>reefGrabbed.reduce((sum,idx)=>{const at=onScreen(selSim.fish[idx]);return sum+Math.hypot(at.x-reefDrop.x,at.y-reefDrop.y);},0)/reefGrabbed.length;
+const reefDragBefore=reefScreenDistance();
+for(let i=0;i<60*6;i++)selSim.step(FIXED_STEP);
+const reefDragAfter=reefScreenDistance();
+assert.ok(reefDragAfter<reefDragBefore*.6,`The dragged reef group must come to the cursor (${reefDragBefore.toFixed(0)}px to ${reefDragAfter.toFixed(0)}px)`);
+selSim.drag({phase:'end',x0:reefHandle.x,y0:reefHandle.y,x:reefDrop.x,y:reefDrop.y});
+selSim.step(FIXED_STEP);
+assert.deepEqual(selSim.selectedFish,reefGrabbed,'Letting go keeps the group selected');
+for(let i=0;i<60*8;i++)selSim.step(FIXED_STEP);
+assert.ok(selSim.fish.every(f=>f.state!=='herd'),'A group let go of settles once delivered');
+
+// A quick flick: let go almost at once, and the group still swims on to where it was put.
+const flickHandle=onScreen(selSim.fish[reefGrabbed[0]]);
+assert.equal(selSim.drag({phase:'start',x0:flickHandle.x,y0:flickHandle.y,x:flickHandle.x,y:flickHandle.y}),'herd','The released group can be picked up again');
+const flickTo={x:flickHandle.x<960?1450:450,y:420};
+selSim.drag({phase:'move',x0:flickHandle.x,y0:flickHandle.y,x:flickTo.x,y:flickTo.y});selSim.step(FIXED_STEP);
+selSim.drag({phase:'end',x0:flickHandle.x,y0:flickHandle.y,x:flickTo.x,y:flickTo.y});
+const flickDistance=()=>reefGrabbed.reduce((sum,idx)=>{const at=onScreen(selSim.fish[idx]);return sum+Math.hypot(at.x-flickTo.x,at.y-flickTo.y);},0)/reefGrabbed.length;
+const flickBefore=flickDistance();
+for(let i=0;i<60*6;i++)selSim.step(FIXED_STEP);
+const flickAfter=flickDistance();
+assert.ok(flickAfter<flickBefore*.6,`A flicked reef group must still reach where it was let go (${flickBefore.toFixed(0)}px to ${flickAfter.toFixed(0)}px)`);
+
+// Play Mode test: fish remain selected in play mode, herd to pointer, and stay selected on release
 const playSim=new ReefSimulation(9999);
 playSim.setPlayMode(true);
 playSim.setSelection({x0:0,y0:0,x1:1920,y1:1080},selCamera);
@@ -151,13 +206,13 @@ for(let i=0;i<120;i++)playSim.step(FIXED_STEP,herdReefPointer);
 const reefDistAfter=playSim.selectedFish.reduce((sum,idx)=>sum+playSim.fish[idx].position.distanceTo(herdReefPointer.position),0)/herdedReefCount;
 assert.ok(reefDistAfter<reefDistBefore,`Herded reef fish should follow pointer (before ${reefDistBefore.toFixed(2)}, after ${reefDistAfter.toFixed(2)})`);
 
-// Release herd: scatter and highlight resets to 0
+// Release herd: the group stays selected in play mode, ready to be picked up again
 playSim.setHerd({active:false});
 playSim.step(FIXED_STEP,herdReefPointer);
-for(const f of playSim.fish){
-  assert.equal(f.highlight,0,'Herded reef fish highlight must reset to 0 upon release');
-}
-assert.equal(playSim.selectedFish.length,0,'No fish should remain selected after herd release');
+assert.equal(playSim.selectedFish.length,herdedReefCount,'Released reef fish stay selected in play mode');
+for(let i=0;i<60*8;i++)playSim.step(FIXED_STEP);
+assert.ok(playSim.fish.every(f=>f.state!=='herd'),'A released herd settles once delivered');
 playSim.setPlayMode(false);
+assert.equal(playSim.selectedFish.length,0,'Leaving play mode clears the selection');
 
 console.log(JSON.stringify({pass:true,simulatedSeconds:sim.time,consumed:sim.consumed,maxClownfishHostDistance:maxHome,...sim.diagnostics()},null,2));

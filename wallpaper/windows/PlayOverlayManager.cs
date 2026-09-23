@@ -11,21 +11,20 @@ public sealed class PlayOverlayManager : IDisposable
     private readonly Action<bool> _onStateChanged;
     private readonly List<PlayOverlayForm> _overlays = new();
     private readonly System.Windows.Forms.Timer _idleTimer;
+    private readonly Func<bool> _addFishMode;
     private int _idleSeconds = 0;
-    private int _selectedFishCount = 0;
     private bool _isActive = false;
 
     public bool IsActive => _isActive;
-    public int SelectedFishCount
-    {
-        get => _selectedFishCount;
-        set => _selectedFishCount = value;
-    }
+    public bool AddFishMode => _addFishMode();
+    public DragGesture Drag { get; }
 
-    public PlayOverlayManager(Func<IReadOnlyList<WallpaperWindow>> windowsProvider, Action<bool> onStateChanged)
+    public PlayOverlayManager(Func<IReadOnlyList<WallpaperWindow>> windowsProvider, Action<bool> onStateChanged, Func<bool> addFishMode)
     {
         _windowsProvider = windowsProvider;
         _onStateChanged = onStateChanged;
+        _addFishMode = addFishMode;
+        Drag = new DragGesture(windowsProvider);
 
         _idleTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _idleTimer.Tick += OnIdleTick;
@@ -47,7 +46,6 @@ public sealed class PlayOverlayManager : IDisposable
     {
         if (_isActive) return;
         _isActive = true;
-        _selectedFishCount = 0;
         _idleSeconds = 0;
 
         var windows = _windowsProvider();
@@ -69,6 +67,7 @@ public sealed class PlayOverlayManager : IDisposable
         if (!_isActive) return;
         _isActive = false;
         _idleTimer.Stop();
+        Drag.Cancel();
 
         foreach (var overlay in _overlays)
         {
@@ -84,7 +83,6 @@ public sealed class PlayOverlayManager : IDisposable
             win.ClearSelection();
         }
 
-        _selectedFishCount = 0;
         _onStateChanged(false);
         Logger.Info("[PlayMode] Exited Play Mode.");
     }
@@ -107,17 +105,6 @@ public sealed class PlayOverlayManager : IDisposable
 
     public IReadOnlyList<WallpaperWindow> Windows => _windowsProvider();
 
-    private long _lastSelectTime;
-
-    // Throttled to 30 Hz; each window clips the box to its own screen.
-    public void SelectAll(Point? start, Point? current)
-    {
-        long now = Environment.TickCount64;
-        if (start != null && now - _lastSelectTime < 33) return;
-        _lastSelectTime = now;
-        foreach (var win in _windowsProvider()) win.SelectPhysical(start, current);
-    }
-
     public WallpaperWindow? FindWindowForPoint(Point pt)
     {
         var windows = _windowsProvider();
@@ -129,18 +116,6 @@ public sealed class PlayOverlayManager : IDisposable
             }
         }
         return null;
-    }
-
-    // A box can span monitors, so every screen's tank is asked.
-    public async Task RefreshSelectedCountAsync()
-    {
-        int count = 0;
-        foreach (var win in _windowsProvider())
-        {
-            count += await win.GetSelectedFishCountAsync();
-        }
-        _selectedFishCount = count;
-        Logger.Info($"[PlayMode] Selected fish count: {_selectedFishCount}");
     }
 
     public void Dispose()
@@ -159,7 +134,6 @@ internal sealed class PlayOverlayForm : Form
 
     private bool _isMouseDown = false;
     private bool _hasDragged = false;
-    private bool _isHerding = false;
     private Point _dragStart = Point.Empty;
 
     public PlayOverlayForm(PlayOverlayManager manager, WallpaperWindow window)
@@ -173,8 +147,17 @@ internal sealed class PlayOverlayForm : Form
         Bounds = window.TargetScreen.Bounds;
         BackColor = Color.Black;
 
-        _hintBanner = new PlayHintBannerForm(window.TargetScreen);
+        _hintBanner = new PlayHintBannerForm(window.TargetScreen, () => manager.AddFishMode);
         _selectionBox = new PlaySelectionBoxForm();
+        // The marquee is only drawn once the tank has said the drag is a selection.
+        _manager.Drag.ModeResolved += OnDragModeResolved;
+    }
+
+    private void OnDragModeResolved(string mode)
+    {
+        if (mode == "select" && _isMouseDown && _hasDragged &&
+            _window.TargetScreen.Bounds.Contains(_dragStart))
+            _selectionBox.UpdateMarquee(_dragStart, Cursor.Position);
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -226,13 +209,6 @@ internal sealed class PlayOverlayForm : Form
             _isMouseDown = true;
             _hasDragged = false;
             _dragStart = Cursor.Position;
-            _isHerding = _manager.SelectedFishCount > 0;
-
-            if (_isHerding)
-            {
-                var targetWin = _manager.FindWindowForPoint(Cursor.Position) ?? _window;
-                targetWin.HerdPhysical(true, Cursor.Position);
-            }
         }
     }
 
@@ -252,19 +228,12 @@ internal sealed class PlayOverlayForm : Form
             if (!_hasDragged && (dx > 4 || dy > 4))
             {
                 _hasDragged = true;
+                _manager.Drag.Begin(_dragStart, currentPoint);
             }
-
-            if (_hasDragged)
+            else if (_hasDragged)
             {
-                if (_isHerding)
-                {
-                    targetWin.HerdPhysical(true, currentPoint);
-                }
-                else
-                {
-                    _selectionBox.UpdateMarquee(_dragStart, currentPoint);
-                    _manager.SelectAll(_dragStart, currentPoint);
-                }
+                if (_manager.Drag.Mode == "select") _selectionBox.UpdateMarquee(_dragStart, currentPoint);
+                _manager.Drag.Move(currentPoint);
             }
         }
     }
@@ -280,25 +249,20 @@ internal sealed class PlayOverlayForm : Form
             var currentPoint = Cursor.Position;
             var targetWin = _manager.FindWindowForPoint(currentPoint) ?? _window;
 
-            if (_isHerding)
+            if (_hasDragged)
             {
-                // Release herding: scatters fish briefly
-                targetWin.HerdPhysical(false, currentPoint);
-                _isHerding = false;
-                _manager.SelectedFishCount = 0;
-            }
-            else if (_hasDragged)
-            {
-                // Finished selecting fish
+                // Finished selecting fish, or put down the group being moved.
                 _selectionBox.HideMarquee();
-                _manager.SelectAll(null, null);
-                _ = _manager.RefreshSelectedCountAsync();
+                _manager.Drag.End(currentPoint);
+            }
+            else if (_manager.AddFishMode)
+            {
+                targetWin.AddFishPhysical(currentPoint);
             }
             else
             {
                 // Click on empty water without dragging clears selection
                 foreach (var win in _manager.Windows) win.ClearSelection();
-                _manager.SelectedFishCount = 0;
             }
         }
     }
@@ -317,6 +281,7 @@ internal sealed class PlayOverlayForm : Form
     {
         if (disposing)
         {
+            _manager.Drag.ModeResolved -= OnDragModeResolved;
             _hintBanner.Close();
             _hintBanner.Dispose();
             _selectionBox.Close();
@@ -328,15 +293,19 @@ internal sealed class PlayOverlayForm : Form
 
 internal sealed class PlayHintBannerForm : Form
 {
-    private const string HintText = "Play mode — drag to select fish, drag again to herd them, right-click to feed, Esc to exit";
+    private readonly Func<bool> _addFishMode;
+    private string HintText => _addFishMode()
+        ? "Play mode — click to add a fish, drag to select, drag a selected fish to move them all, right-click to feed, Esc to exit"
+        : "Play mode — drag to select fish, then drag one of them to move them all, right-click to feed, Esc to exit";
 
-    public PlayHintBannerForm(Screen screen)
+    public PlayHintBannerForm(Screen screen, Func<bool> addFishMode)
     {
+        _addFishMode = addFishMode;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
 
-        int width = 640;
+        int width = 820;
         int height = 36;
         int x = screen.Bounds.Left + (screen.Bounds.Width - width) / 2;
         int y = screen.Bounds.Top + 24;

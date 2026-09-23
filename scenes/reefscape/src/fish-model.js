@@ -423,7 +423,7 @@ function fishMaterial(kind) {
       }
       if(vHighlight>0.0){
         float hFresnel=pow(1.-abs(dot(normal,normalize(vViewPosition))),2.5);
-        diffuseColor.rgb+=vec3(.15,.50,.65)*(vHighlight*hFresnel*1.8+vHighlight*.15);
+        diffuseColor.rgb+=vec3(.15,.50,.65)*(vHighlight*hFresnel*3.0+vHighlight*.4);
       }
     `,
   });
@@ -462,7 +462,7 @@ export function createFishSchool(scene,simulation){
     }
     for(const group of groups){
       for(let i=0;i<group.fish.length;i++){
-        const f=group.fish[i];dummy.position.copy(f.position);dummy.scale.setScalar(f.size);euler.set(f.roll,f.yaw,f.pitch);dummy.quaternion.setFromEuler(euler);dummy.updateMatrix();group.mesh.setMatrixAt(i,dummy.matrix);
+        const f=group.fish[i];dummy.position.copy(f.position);dummy.scale.setScalar(f.size*(f.grow??1));euler.set(f.roll,f.yaw,f.pitch);dummy.quaternion.setFromEuler(euler);dummy.updateMatrix();group.mesh.setMatrixAt(i,dummy.matrix);
         // The simulation owns effort and amplitude. No hidden idle oscillation here;
         // a coast is straight. The travelling wave runs from the head toward the tail.
         group.data.set([f.phase,f.tailAmplitude,...group.trim[i]],i*4);

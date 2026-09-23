@@ -11,14 +11,24 @@ export const FIXED_STEP=1/60;
 // is 3.4 — and a captive lyretail harem is one terminal male to four to six females. Nine
 // chromis is also a keeper's number: below seven a pod concentrates its aggression on one
 // fish and eats itself down to a single survivor.
-// A curious fish only notices a cursor this close (units of 10 cm).
-export const CURIOUS_RANGE=4;
+// A curious fish notices the cursor from anywhere in the tank, after a moment that grows
+// with its distance (FOLLOW.notice + FOLLOW.perUnit per unit), and loses interest only in
+// a cursor left still for FOLLOW.bored seconds. Dragged and curious fish take sunflower
+// slots round their centre, `ring` out and `spacing` more per fish, so a crowd opens out.
+const FOLLOW={notice:[.08,.5],perUnit:.1,bored:15,boredFade:4,ring:.8,spacing:.3,herdRing:.25,herdSpacing:.3,deliver:6,arrived:.4};
+// A shy fish is pushed out of a moving cursor's way, further and harder the faster it goes,
+// and only a real lunge sends the shoal diving for shelter.
+const SHY={radius:3,reachGain:.12,speedGain:.5,push:1.6,hurry:1.2,calm:1.6,lunge:2,lungeRange:4,dart:3.5,dartRange:8.5};
+// A finished drag-selection is held this long (s) so it can be picked up and dragged, and a
+// press this close (CSS px) to a selected fish picks it up.
+export const SELECTION_HOLD=12;
+const SELECTION_FADE=1.5,GRAB_RADIUS=90;
 export const POPULATION={clownfish:3,chromis:9,anthias:7,shrimp:2};
 // Tank sizes the host offers. The clownfish are a fixed queue on the one anemone and the
 // shrimp hold the two cleaning stations, so only the two shoals grow; Crowded is about two
 // and a half times Normal. Fish added by hand come on top, up to ADD_LIMIT.
 export const POPULATIONS={few:{chromis:5,anthias:4},normal:{chromis:9,anthias:7},lots:{chromis:15,anthias:12},crowded:{chromis:22,anthias:18}};
-export const ADD_LIMIT=20;
+export const ADD_LIMIT=200;
 const REEF_BOUNDS=[...ROCKS,...CORAL_BOUNDS];
 // Where the two Acropora thickets sit in that list. A chromis does not merely hover near
 // its colony, it lives in it — juveniles barely leave the branches and the whole pod drops
@@ -124,9 +134,17 @@ export function seatShrimp(x,z,yaw){
 export class ReefSimulation {
   constructor(seed=36719,population='normal') {
     const shoal=POPULATIONS[population]||POPULATIONS.normal;
-    this.random=randomGenerator(seed);this.time=0;this.fish=[];this.food=Array.from({length:32},()=>({active:false,position:V(),velocity:V(),age:0,size:0}));
+    this.random=randomGenerator(seed);this.time=0;this.fish=[];this.food=Array.from({length:48},()=>({active:false,position:V(),velocity:V(),age:0,size:0}));
     this.lastFeed=-10;this.consumed=0;this.steps=0;
-    this.mode='shy';this.pointerStillTime=0;this._curiousGoal=V();this.currentBox=null;this.camera=null;this._tempProj=V();this.playMode=false;this.isHerding=false;
+    this.mode='shy';this.pointerStillTime=0;this.curiousInterest=0;this._curiousGoal=V();this.currentBox=null;this.camera=null;this._tempProj=V();this.playMode=false;this.isHerding=false;
+    // A drag is often over long before the fish have caught up with it, so a group that has
+    // been let go of is still delivered to where it was put down.
+    this.delivering=false;this.deliverUntil=0;
+    // A drag in progress ('select' or 'herd'), how long a finished selection is held, and
+    // where a dragged group is being taken: the cursor's ray cut at the depth it was picked
+    // up at, or the pointer itself for a host that sends no screen point.
+    this.gesture=null;this.holdUntil=-Infinity;this.herdTarget=V();this.herdOffset=V();this.herdDepth=1;this.herdFromPointer=true;
+    this._ray=new THREE.Raycaster();this._ndc=new THREE.Vector2();this._plane=new THREE.Plane(V(0,0,1),0);
     this._flow=V();this._delta=V();this._desired=V();this._force=V();this._sep=V();this._cohesion=V();this._align=V();this._relative=V();this._heading=V();this.navigation=reefNavigation();
     this.shoals=SHOALS.map((s,i)=>({...s,home:V(...s.home),centre:V(...s.home),velocity:V(),swell:1,out:V(),path:[],sector:i===0?2:i===1?0:1,direction:i===1?-1:1,legs:1}));
     // Buston & Cant measured 177 adjacent-rank pairs on wild percula: a dominant ends up
@@ -149,7 +167,8 @@ export class ReefSimulation {
   add(kind,position,size,rank,shoal=-1) {
     const r=this.random;
     const f={kind,rank,size,shoal,station:V(r()*2-1,r()*2-1,r()*2-1),position:V(),velocity:V(kind==='clown'?.11:-.28,0,.02),goal:V(),goalTimer:0,phase:r()*6.28,yaw:kind==='clown'?0:Math.PI,pitch:0,bank:0,roll:0,bend:0,turning:0,
-      speed:.1,wave:0,tailAmplitude:0,tailHz:0,steer:V(),route:[],routeTimer:0,cruise:.92+r()*.16,beat:false,bout:r(),pectoral:r()*6.28,rowing:1,alarm:0,shelterAccess:0,spook:0,state:'forage',hold:0,show:6+r()*9,display:0,roam:0,follow:null,highlight:0,wasSelected:false};
+      speed:.1,wave:0,tailAmplitude:0,tailHz:0,steer:V(),route:[],routeTimer:0,cruise:.92+r()*.16,beat:false,bout:r(),pectoral:r()*6.28,rowing:1,alarm:0,shelterAccess:0,spook:0,state:'forage',hold:0,show:6+r()*9,display:0,roam:0,follow:null,highlight:0,wasSelected:false,
+      attending:false,noticeAt:0,wary:0,grow:1,slot:V()};
     if(position)f.position.set(...position);else{
       this.station(f,f.position);
       // Spawn in water, not inside a thicket followed by a visible first-frame push-out.
@@ -160,15 +179,34 @@ export class ReefSimulation {
   // One more chromis or anthias, even odds, swimming in from a side of the tank to its shoal.
   // Null once ADD_LIMIT have been added. A side with rock at the edge falls back to the
   // shoal's own water, as a new fish at construction does.
-  addFish(){
+  // Given a point on the page (CSS px) it appears there, along that line of sight in open
+  // water, and grows in from a speck; where the line only meets rock it comes from a side.
+  addFish(x,y){
     if(this.fish.length>=this.limit)return null;
     const r=this.random,kind=r()<.5?'chromis':'anthias',shoal=kind==='anthias'?2:r()<.5?0:1,rank=this.fish.filter(f=>f.kind===kind).length;
     const f=this.add(kind,null,(kind==='chromis'?.63+r()*.13:.66+r()*.09),rank,shoal),side=r()<.5?-1:1;
-    this._delta.set(side*(SWIM_BOUNDS.x[1]-.3),f.position.y,f.position.z);
-    if(clearWater(this._delta,.40)){f.position.copy(this._delta);f.goal.copy(f.position);}
-    f.yaw=side<0?0:Math.PI;f.velocity.set(-side*.5,0,0);f.speed=.5;
+    let placed=false;
+    if(x!==undefined&&y!==undefined)for(const depth of [2.6,3.4,1.8,4.2,1.0]){
+      if(!this.screenToTank(x,y,depth,this._delta))break;
+      this._delta.y=clamp(this._delta.y,groundHeight(this._delta.x,this._delta.z)+.5,TANK.surface-.5);
+      if(Math.abs(this._delta.x)<8.8&&clearWater(this._delta,.40)){placed=true;break;}
+    }
+    if(placed){
+      f.position.copy(this._delta);f.goal.copy(f.position);f.yaw=r()*Math.PI*2;f.velocity.set(0,0,0);f.speed=.25;f.grow=.15;
+    }else{
+      this._delta.set(side*(SWIM_BOUNDS.x[1]-.3),f.position.y,f.position.z);
+      if(clearWater(this._delta,.40)){f.position.copy(this._delta);f.goal.copy(f.position);}
+      f.yaw=side<0?0:Math.PI;f.velocity.set(-side*.5,0,0);f.speed=.5;
+    }
     this.previous.push({p:V(),v:V(),alarm:0});
     return f;
+  }
+  // The cursor's ray, from CSS pixels on the page, cut at a depth in the tank.
+  screenToTank(x,y,depth,out){
+    if(!this.camera)return null;
+    const w=typeof window!=='undefined'?window.innerWidth:1920,h=typeof window!=='undefined'?window.innerHeight:1080;
+    this._ndc.set(x/w*2-1,-y/h*2+1);this._ray.setFromCamera(this._ndc,this.camera);this._plane.constant=-depth;
+    return this._ray.ray.intersectPlane(this._plane,out);
   }
   // Where this animal's slot in its shoal currently sits. Popper & Fishelson found the
   // territorial male anthias holding the water right against the rock with the females and
@@ -194,12 +232,16 @@ export class ReefSimulation {
   }
   // Pellets enter just inside the wide view's top edge, which meets the front of the reef
   // about 1.2 units below the surface; dropped at the surface they took six seconds to show.
-  feed(x=0,z=1) {
-    if(this.time-this.lastFeed<1)return 0;
-    let count=0;
+  // With y, the pinch goes in right there - where it was clicked, depth and all - as a
+  // small cloud rather than along the top of the view.
+  feed(x=0,z=1,y) {
+    if(this.time-this.lastFeed<.5)return 0;
+    let count=0;const at=y!==undefined;
     for(const pellet of this.food)if(!pellet.active&&count<8){
       pellet.active=true;pellet.age=0;pellet.size=.027+this.random()*.015;
-      pellet.position.set(clamp(x+(this.random()-.5)*1.3,-7,7),TANK.surface-1.35-this.random()*.16,z+(this.random()-.5)*.9);
+      if(at){const px=clamp(x+(this.random()-.5)*.5,-8,8),pz=clamp(z+(this.random()-.5)*.6,TANK.back+.5,TANK.front-.6);
+        pellet.position.set(px,clamp(y+(this.random()-.5)*.3,groundHeight(px,pz)+.4,TANK.surface-.4),pz);}
+      else pellet.position.set(clamp(x+(this.random()-.5)*1.3,-7,7),TANK.surface-1.35-this.random()*.16,z+(this.random()-.5)*.9);
       pellet.velocity.set(0,-.04,0);count++;
     }
     if(count)this.lastFeed=this.time;return count;
@@ -209,44 +251,80 @@ export class ReefSimulation {
   setMode(mode) {
     this.mode=mode==='curious'?'curious':'shy';
   }
+  get holding(){return this.playMode||this.isHerding||this.gesture==='herd'||this.time<this.holdUntil;}
+  clearSelection(){if(this.delivering)this.endDelivery();this.currentBox=null;this.releaseBox=false;this.holdUntil=-Infinity;for(const f of this.fish){f.highlight=0;f.wasSelected=false;}}
   setSelection(box, camera) {
-    if (box === 'clear') {
-      this.currentBox = null;
-      for (const f of this.fish) {
-        f.highlight = 0;
-        f.wasSelected = false;
-      }
-      return;
-    }
-    this.currentBox = box;
     if (camera) this.camera = camera;
+    if (box === 'clear') { this.clearSelection(); return; }
+    if (!box && this.currentBox) this.holdUntil = this.time + SELECTION_HOLD;
+    this.currentBox = box;
   }
   setPlayMode(active) {
     this.playMode = Boolean(active);
-    if (!this.playMode) {
-      this.isHerding = false;
-      for (const f of this.fish) {
-        f.highlight = 0;
-        f.wasSelected = false;
-      }
-    }
+    if (!this.playMode) { this.isHerding = false; this.gesture = null; this.clearSelection(); }
   }
-  setHerd(state) {
-    const next = typeof state === 'object' && state !== null ? Boolean(state.active) : Boolean(state);
-    if (this.isHerding && !next) {
-      for (const f of this.fish) {
-        if (f.highlight > 0) {
-          f.yaw += (this.random() - .5) * Math.PI * .8;
-          f.velocity.x += (this.random() - .5) * 2.8;
-          f.velocity.z += (this.random() - .5) * 2.8;
-          f.tailAmplitude = .85;
-          f.speed = Math.max(f.speed, 1.4);
-          f.highlight = 0;
-          f.wasSelected = false;
-        }
-      }
+  // A press near one of the held selection's fish on screen picks the group up.
+  // Or anywhere inside the patch of screen the group covers: fish move, and a press that
+  // just misses one should not throw the whole selection away.
+  grabbable(x,y){
+    if(!this.camera||!this.holding)return false;
+    const w=typeof window!=='undefined'?window.innerWidth:1920,h=typeof window!=='undefined'?window.innerHeight:1080;
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    for(const f of this.fish){
+      if(f.highlight<=.05)continue;
+      this._tempProj.copy(f.position).project(this.camera);
+      if(this._tempProj.z<-1||this._tempProj.z>1)continue;
+      const sx=(this._tempProj.x*.5+.5)*w,sy=(-this._tempProj.y*.5+.5)*h;
+      if(Math.hypot(sx-x,sy-y)<GRAB_RADIUS)return true;
+      minX=Math.min(minX,sx);maxX=Math.max(maxX,sx);minY=Math.min(minY,sy);maxY=Math.max(maxY,sy);
     }
-    this.isHerding = next;
+    const m=GRAB_RADIUS*.5;
+    return x>minX-m&&x<maxX+m&&y>minY-m&&y<maxY+m;
+  }
+  beginHerd(x,y){
+    const c=this._cohesion.set(0,0,0);let n=0;
+    for(const f of this.fish)if(f.highlight>.05){c.add(f.position);n++;}
+    if(!n)return false;
+    c.multiplyScalar(1/n);this.herdDepth=clamp(c.z,TANK.back+1,TANK.front-1.5);
+    this.herdFromPointer=x===undefined||!this.screenToTank(x,y,this.herdDepth,this.herdTarget);
+    if(this.herdFromPointer)this.herdOffset.set(0,0,0);
+    else{this.herdOffset.subVectors(c,this.herdTarget);limitVector(this.herdOffset,.5);this.herdTarget.add(this.herdOffset);}
+    this.isHerding=true;this.delivering=false;return true;
+  }
+  aimHerd(x,y){
+    if(this.herdFromPointer||!this.screenToTank(x,y,this.herdDepth,this.herdTarget))return;
+    this.herdTarget.add(this.herdOffset);
+  }
+  // Let go: the group swims on from where it was left and stays selected, ready to be
+  // picked up again.
+  // Let go: the group swims on to where it was put down, for up to FOLLOW.deliver seconds.
+  releaseHerd(){this.isHerding=false;this.holdUntil=this.time+SELECTION_HOLD;this.delivering=true;this.deliverUntil=this.time+FOLLOW.deliver;}
+  endDelivery(){this.delivering=false;for(const f of this.fish)if(f.highlight>.05){f.goalTimer=0;f.follow=null;}}
+  // A drag on the page from the host, in CSS px: from (x0,y0) to (x,y). Begun on the held
+  // selection it carries it; begun anywhere else it draws a marquee. Answers which.
+  drag({phase,x0,y0,x,y}={}){
+    if(phase==='start'){
+      if(this.gesture)this.drag({phase:'cancel'});
+      if(this.grabbable(x0,y0)&&this.beginHerd(x0,y0)){this.gesture='herd';this.aimHerd(x,y);}
+      else{this.gesture='select';this.clearSelection();this.currentBox={x0,y0,x1:x,y1:y};}
+      return this.gesture;
+    }
+    if(!this.gesture)return 'none';
+    const was=this.gesture;
+    if(phase==='move'){if(was==='herd')this.aimHerd(x,y);else this.currentBox={x0,y0,x1:x,y1:y};return was;}
+    this.gesture=null;
+    if(was==='herd')this.releaseHerd();
+    else if(phase==='end'){this.currentBox={x0,y0,x1:x,y1:y};this.releaseBox=true;this.holdUntil=this.time+SELECTION_HOLD;}
+    else this.clearSelection();
+    return was;
+  }
+  // The older host call: herd toward {x, y} in CSS px when given, otherwise the pointer.
+  setHerd(state) {
+    const next=typeof state==='object'&&state!==null?Boolean(state.active):Boolean(state);
+    const point=typeof state==='object'&&state!==null&&Number.isFinite(state.x)&&Number.isFinite(state.y);
+    if(next&&!this.isHerding)this.beginHerd(point?state.x:undefined,point?state.y:undefined);
+    else if(next&&point)this.aimHerd(state.x,state.y);
+    else if(!next&&this.isHerding)this.releaseHerd();
   }
   chooseGoal(f) {
     const r=this.random;
@@ -345,13 +423,15 @@ export class ReefSimulation {
   step(dt=FIXED_STEP,pointer=null) {
     if(!Number.isFinite(dt)||dt<=0||dt>.101)throw new RangeError('Simulation step must be 0 < dt <= 0.101 seconds.');
     this.time+=dt;this.steps++;
+    // Any real movement makes the cursor interesting again at once; only one left alone
+    // for a while is lost interest in.
     if(pointer){
-      const speed=pointer.speed||0;
-      if(speed<.15)this.pointerStillTime=(this.pointerStillTime||0)+dt;
-      else this.pointerStillTime=Math.max(0,(this.pointerStillTime||0)-dt*2);
+      if((pointer.speed||0)<.3)this.pointerStillTime+=dt;
+      else this.pointerStillTime=0;
     }else{
       this.pointerStillTime=0;
     }
+    this.curiousInterest=this.mode==='curious'&&pointer?1-clamp((this.pointerStillTime-FOLLOW.bored)/FOLLOW.boredFade,0,1):0;
     if(this.currentBox&&this.camera){
       const minX=Math.min(this.currentBox.x0,this.currentBox.x1),maxX=Math.max(this.currentBox.x0,this.currentBox.x1);
       const minY=Math.min(this.currentBox.y0,this.currentBox.y1),maxY=Math.max(this.currentBox.y0,this.currentBox.y1);
@@ -375,15 +455,28 @@ export class ReefSimulation {
         }
       }
     }else{
+      // A finished selection is held: through play mode, while it is dragged and for
+      // SELECTION_HOLD after. Then it fades.
+      const held=this.holding;
       for(const f of this.fish){
         f.wasSelected=false;
-        if(this.playMode&&f.highlight>.05&&!this.isHerding){
-          f.highlight=1.0;
-        }else if(f.highlight>0){
-          f.highlight=Math.max(0,f.highlight-dt/3.0);
-        }
+        if(held&&f.highlight>.05)f.highlight=1.0;
+        else if(f.highlight>0)f.highlight=Math.max(0,f.highlight-dt/SELECTION_FADE);
       }
     }
+    // A marquee let go of before any step saw its final size is still applied once.
+    if(this.releaseBox){this.releaseBox=false;this.currentBox=null;this.holdUntil=this.time+SELECTION_HOLD;}
+    if(this.isHerding){
+      if(this.herdFromPointer&&pointer)this.herdTarget.copy(pointer.position);
+      const h=this.herdTarget;
+      h.x=clamp(h.x,-8,8);h.z=clamp(h.z,TANK.back+.6,TANK.front-.8);h.y=clamp(h.y,groundHeight(h.x,h.z)+.6,TANK.surface-.6);
+    }else if(this.delivering){
+      // Settled once the group is on average within FOLLOW.arrived of its places.
+      let off=0,n=0;for(const f of this.fish)if(f.highlight>.05&&f.state==='herd'){off+=f.position.distanceTo(f.slot);n++;}
+      if(!n||this.time>this.deliverUntil||off/n<FOLLOW.arrived)this.endDelivery();
+    }
+    // Slots in the two formations are handed out in fish order each step.
+    let herdRank=0,gazeRank=0;
     const t=this.time;
     for(const p of this.food)if(p.active){
       p.age+=dt;if(p.age>36){p.active=false;continue;}
@@ -417,8 +510,15 @@ export class ReefSimulation {
       // about eight for the one that saw the threat itself, so the response is held here
       // and released a few frames late. That delay is the whole difference between a
       // school that flinches as one object and one that flinches as a wave.
-      if(f.spook>0&&(f.spook-=dt)<=0)f.alarm=2.3;
-      if(pointer&&pointer.speed>.9&&p.distanceToSquared(pointer.position)<8.5)f.alarm=2.6;
+      const herded=(this.isHerding||this.delivering)&&f.highlight>.05;
+      f.wary*=Math.exp(-dt/SHY.calm);if(f.grow<1)f.grow=Math.min(1,f.grow+dt/.45);
+      if(herded){f.spook=0;f.alarm=0;f.follow=null;f.roam=0;}
+      else{
+        if(f.spook>0&&(f.spook-=dt)<=0)f.alarm=2.3;
+        // Only a real lunge sends a fish for cover; ordinary movement is given room below.
+        if(pointer){const d2=p.distanceToSquared(pointer.position),sp=pointer.speed||0;
+          if((sp>SHY.lunge&&d2<SHY.lungeRange)||(sp>SHY.dart&&d2<SHY.dartRange))f.alarm=2.6;}
+      }
       // Ease out of the shelter envelope after an alarm. Restoring its full radius in a
       // single step would visibly eject a chromis from the thicket when the timer expires.
       f.shelterAccess+=((f.alarm>0?1:0)-f.shelterAccess)*(1-Math.exp(-dt*(f.alarm>0?4:.9)));
@@ -436,8 +536,15 @@ export class ReefSimulation {
       if(f.follow){f.goal.copy(f.follow.position).addScaledVector(f.station,1.2);f.goalTimer=1;}
       else if(f.goalTimer<=0||(!f.hold&&p.distanceToSquared(f.goal)<(f.roam>0?.8:.10)))this.chooseGoal(f);
       else if(f.shoal>=0&&!f.hold&&f.roam<=0)this.station(f,f.goal); // the slot travels with its shoal
-      let goal=f.goal,food=null,nearest=2.5**2;
-      if(f.alarm>0){
+      let goal=f.goal,food=null,nearest=(f.kind==='clown'?2.5:8)**2;
+      const eager=this.curiousInterest>0&&!herded&&f.hold<=0;
+      if(!eager){f.attending=false;f.noticeAt=0;}
+      if(herded){
+        f.state='herd';
+        const angle=herdRank*2.39996,radius=FOLLOW.herdRing+FOLLOW.herdSpacing*Math.sqrt(herdRank);
+        f.slot.set(this.herdTarget.x+Math.cos(angle)*radius,Math.max(.6,this.herdTarget.y+Math.sin(angle)*radius*.75),this.herdTarget.z+((herdRank%3)-1)*.3);
+        herdRank++;goal=f.slot;
+      }else if(f.alarm>0){
         f.state='shelter';f.roam=0;
         // A percula backs into the tentacles; every open-water fish goes down to the
         // structure its shoal is attached to — the chromis into the branches of their own
@@ -459,46 +566,39 @@ export class ReefSimulation {
           if(f.kind==='clown'&&((item.position.x-HOST.x)**2+(item.position.y-HOST.y-.7)**2+(item.position.z-HOST.z)**2)>10)continue;
           const d=p.distanceToSquared(item.position);if(d<nearest){nearest=d;food=item;goal=item.position;}
         }
-        if(food)f.state='feed';
-        else if(this.isHerding&&f.highlight>0&&pointer){
-          const angle=(index*137.5*Math.PI)/180;
-          const radius=0.35+0.15*(index%5);
-          const tx=pointer.position.x+Math.cos(angle)*radius;
-          const ty=Math.max(0.6,pointer.position.y-0.2-0.1*(index%4));
-          const tz=pointer.position.z+Math.sin(angle)*radius;
-          this._curiousGoal.set(tx,ty,tz);
-          goal=this._curiousGoal;
-          f.state='herd';
-        }else if(this.mode==='curious'&&pointer&&f.hold<=0){
-          const reach=p.distanceToSquared(pointer.position)<CURIOUS_RANGE*CURIOUS_RANGE;
-          const interest=!reach?0:this.pointerStillTime<8?1:Math.max(0,1-(this.pointerStillTime-8)/3);
-          if(interest>0){
-            const angle=(index*137.5*Math.PI)/180;
-            const radius=0.65+0.3*(index%5);
-            const tx=pointer.position.x+Math.cos(angle)*radius;
-            const ty=Math.max(0.6,pointer.position.y-0.25-0.15*(index%4));
-            const tz=pointer.position.z+Math.sin(angle)*radius;
-            if(f.kind==='clown'){
-              const hx=tx-HOST.x,hy=ty-HOST.y,hz=tz-HOST.z;
-              if(hx*hx+hy*hy+hz*hz<6.0){
-                this._curiousGoal.set(tx,ty,tz);
-                goal=this._curiousGoal;
-                f.state='curious';
-              }
-            }else{
-              this._curiousGoal.set(tx,ty,tz);
-              goal=this._curiousGoal;
-              f.state='curious';
-            }
+        if(food){f.state='feed';f.attending=false;f.noticeAt=0;}
+        else if(eager){
+          // Noticed after a moment that grows with distance, so the tank turns toward the
+          // cursor as a wave; then a slot in a slowly turning ring just behind it.
+          if(!f.attending){
+            if(!f.noticeAt)f.noticeAt=this.time+FOLLOW.notice[0]+this.random()*(FOLLOW.notice[1]-FOLLOW.notice[0])+Math.sqrt(p.distanceToSquared(pointer.position))*FOLLOW.perUnit;
+            else if(this.time>=f.noticeAt){f.attending=true;f.noticeAt=0;f.follow=null;f.roam=0;}
+          }
+          if(f.attending){
+            const angle=gazeRank*2.39996+this.time*.12,radius=FOLLOW.ring+FOLLOW.spacing*Math.sqrt(gazeRank);
+            const tx=pointer.position.x+Math.cos(angle)*radius,ty=Math.max(.6,pointer.position.y+Math.sin(angle)*radius*.75+Math.sin(this.time*.8+f.phase)*.08),tz=pointer.position.z-.5+((gazeRank%3)-1)*.3;
+            gazeRank++;
+            // The clownfish never leave their anemone for it; they come to its near edge.
+            const hx=tx-HOST.x,hy=ty-HOST.y,hz=tz-HOST.z;
+            if(f.kind!=='clown'||hx*hx+hy*hy+hz*hz<6.0){f.slot.set(tx,ty,tz);goal=f.slot;f.state='curious';}
           }
         }
       }
       // A fish being cleaned, or one wallowing in the tentacles, is barely swimming.
       if(f.kind!=='clown'&&f.alarm<=0&&f.state!=='herd')goal=this.travelGoal(f,goal,dt);
       this._delta.subVectors(goal,p);const dist=this._delta.length();
-      const topSpeed=(f.kind==='clown'?.59:f.kind==='anthias'?.98:1.10)*f.cruise*(f.alarm>0?1.65:f.display>0?1.5:food?1.3:f.state==='herd'?1.9:f.state==='curious'&&dist<.4?.38:f.hold&&p.distanceToSquared(f.goal)<.5?.16:1);
+      const topSpeed=(f.kind==='clown'?.59:f.kind==='anthias'?.98:1.10)*f.cruise*(f.alarm>0?1.65:f.display>0?1.5:food?1.7:f.state==='herd'?2.6:f.state==='curious'?(dist<.4?.38:dist>2?1.5:1):f.hold&&p.distanceToSquared(f.goal)<.5?.16:1)*(1+SHY.hurry*f.wary);
       this._force.copy(this._delta).multiplyScalar(dist>1e-5?Math.min(topSpeed,dist*.68)/dist:0);
       this._force.sub(this._flow); // swim velocity relative to the moving water
+      if(this.mode!=='curious'&&pointer&&!herded&&f.alarm<=0){
+        this._delta.subVectors(p,pointer.position);const d=this._delta.length(),sp=Math.min(pointer.speed||0,6);
+        const reach=SHY.radius*(1+sp*SHY.reachGain);
+        if(d<reach&&d>1e-3){
+          const pressure=(1-d/reach)*(.35+sp*SHY.speedGain);
+          f.wary=Math.max(f.wary,Math.min(1,pressure));
+          this._delta.y*=.45;this._delta.normalize();this._force.addScaledVector(this._delta,pressure*SHY.push);
+        }
+      }
       this._sep.set(0,0,0);this._cohesion.set(0,0,0);this._align.set(0,0,0);let neighbors=0;
       for(let j=0;j<this.fish.length;j++)if(j!==index){
         const other=this.fish[j],q=old[j].p;this._delta.subVectors(p,q);const d2=this._delta.lengthSq();

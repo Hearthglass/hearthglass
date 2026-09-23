@@ -32,6 +32,7 @@ public class WallpaperController : ApplicationContext
     private readonly RegisteredWaitHandle _activateWait;
     private readonly MouseHookManager _mouseHookManager;
     private readonly PlayOverlayManager _playOverlayManager;
+    private readonly DragGesture _desktopDrag;
 
     private const int PLAY_MODE_HOTKEY_ID = 9001;
     private const int ESC_HOTKEY_ID = 9002;
@@ -39,6 +40,8 @@ public class WallpaperController : ApplicationContext
     private bool _awake = true;
     private int _maxAppliedRate = 0;
     private bool _isRebuilding = false;
+    // While on, a click on the desktop (or in play mode) puts a fish there instead of food.
+    private bool _addFishMode = false;
 
     public WallpaperController()
     {
@@ -50,7 +53,8 @@ public class WallpaperController : ApplicationContext
         _mouseHookManager.OnEmptyDesktopClick += OnEmptyDesktopClick;
         _mouseHookManager.OnDragMove += OnEmptyDesktopDragMove;
         _mouseHookManager.OnDragEnd += OnEmptyDesktopDragEnd;
-        _playOverlayManager = new PlayOverlayManager(() => _windows, OnPlayModeStateChanged);
+        _playOverlayManager = new PlayOverlayManager(() => _windows, OnPlayModeStateChanged, () => _addFishMode);
+        _desktopDrag = new DragGesture(() => _windows);
 
         // System Tray Menu
         var contextMenu = new ContextMenuStrip();
@@ -95,7 +99,12 @@ public class WallpaperController : ApplicationContext
         _feedItem = new ToolStripMenuItem("Feed", null, (_, _) => FeedFish());
         contextMenu.Items.Add(_feedItem);
 
-        _addFishItem = new ToolStripMenuItem("Add a fish", null, (_, _) => AddFish());
+        _addFishItem = new ToolStripMenuItem("Click to add fish", null, (_, _) => ToggleAddFish())
+        {
+            CheckOnClick = true,
+            Checked = false,
+            ToolTipText = "Each click on the desktop adds a fish where you click, up to 200 extra"
+        };
         contextMenu.Items.Add(_addFishItem);
 
         _clickToFeedItem = new ToolStripMenuItem("Click to feed", null, (_, _) => ToggleClickToFeed())
@@ -105,7 +114,7 @@ public class WallpaperController : ApplicationContext
         };
         contextMenu.Items.Add(_clickToFeedItem);
 
-        _selectFishItem = new ToolStripMenuItem("Select fish by dragging", null, (_, _) => ToggleSelectFish())
+        _selectFishItem = new ToolStripMenuItem("Drag to select and move fish", null, (_, _) => ToggleSelectFish())
         {
             CheckOnClick = true,
             Checked = _settings.SelectFish
@@ -311,7 +320,7 @@ public class WallpaperController : ApplicationContext
 
         _pauseItem.Text = _settings.Paused ? "Resume" : "Pause";
         _feedItem.Enabled = _maxAppliedRate > 0;
-        _addFishItem.Enabled = _maxAppliedRate > 0;
+        _addFishItem.Checked = _addFishMode;
         foreach (var (level, item) in _populationItems) item.Checked = _settings.Population == level;
         foreach (var (level, item) in _qualityItems) item.Checked = _settings.Quality == level;
         _playModeItem.Enabled = !_settings.Paused && _maxAppliedRate > 0 && _awake;
@@ -374,12 +383,12 @@ public class WallpaperController : ApplicationContext
         UpdateMenuState();
     }
 
-    // One fish into the tank on the screen under the cursor, or the first one running.
-    private void AddFish()
+    private void ToggleAddFish()
     {
-        var target = _windows.FirstOrDefault(w => w.TargetScreen.Bounds.Contains(Cursor.Position) && w.CurrentRate > 0)
-                     ?? _windows.FirstOrDefault(w => w.CurrentRate > 0);
-        target?.AddFish();
+        _addFishMode = _addFishItem.Checked;
+        _mouseHookManager.RapidClicks = _addFishMode;
+        UpdateHookState();
+        UpdateMenuState();
     }
 
     private void FeedFish()
@@ -406,49 +415,36 @@ public class WallpaperController : ApplicationContext
         UpdateMenuState();
     }
 
+    // A click on empty desktop adds a fish there in add mode, otherwise feeds there.
     private void OnEmptyDesktopClick(Point physPoint)
     {
-        if (!_settings.ClickToFeed || _settings.Paused || !_awake || _maxAppliedRate <= 0) return;
+        if (_settings.Paused || !_awake || _maxAppliedRate <= 0) return;
+        if (!_addFishMode && !_settings.ClickToFeed) return;
 
-        foreach (var win in _windows)
-        {
-            if (win.TargetScreen.Bounds.Contains(physPoint))
-            {
-                win.ClickPhysical(physPoint);
-                break;
-            }
-        }
+        var win = _windows.FirstOrDefault(w => w.TargetScreen.Bounds.Contains(physPoint));
+        if (win == null) return;
+        if (_addFishMode) win.AddFishPhysical(physPoint);
+        else win.ClickPhysical(physPoint);
     }
 
-    private long _lastDragSelectTime = 0;
-
+    // A drag on empty desktop: begun on the held selection it moves the fish, anywhere
+    // else it selects them. Explorer draws its own rubber band over the desktop meanwhile.
     private void OnEmptyDesktopDragMove(Point start, Point current)
     {
         if (!_settings.SelectFish || _settings.Paused || !_awake || _maxAppliedRate <= 0) return;
 
-        long now = Environment.TickCount64;
-        if (now - _lastDragSelectTime < 33) return; // <= 30 Hz throttling
-        _lastDragSelectTime = now;
-
-        foreach (var win in _windows)
-        {
-            win.SelectPhysical(start, current);
-        }
+        if (!_desktopDrag.IsActive) _desktopDrag.Begin(start, current);
+        else _desktopDrag.Move(current);
     }
 
     private void OnEmptyDesktopDragEnd(Point start, Point current)
     {
-        if (!_settings.SelectFish) return;
-
-        foreach (var win in _windows)
-        {
-            win.SelectPhysical(null, null);
-        }
+        _desktopDrag.End(current);
     }
 
     private void UpdateHookState()
     {
-        bool needsHook = (_settings.ClickToFeed || _settings.SelectFish) && _maxAppliedRate > 0 && !_settings.Paused && _awake
+        bool needsHook = (_settings.ClickToFeed || _settings.SelectFish || _addFishMode) && _maxAppliedRate > 0 && !_settings.Paused && _awake
             && !_playOverlayManager.IsActive;
         if (needsHook && !_mouseHookManager.IsInstalled)
         {
@@ -457,6 +453,7 @@ public class WallpaperController : ApplicationContext
         else if (!needsHook && _mouseHookManager.IsInstalled)
         {
             _mouseHookManager.Uninstall();
+            _desktopDrag.Cancel();
         }
     }
 

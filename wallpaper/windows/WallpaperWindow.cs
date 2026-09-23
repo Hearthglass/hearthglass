@@ -204,6 +204,52 @@ public class WallpaperWindow : Form
         _ = _webView.ExecuteScriptAsync("typeof window.habitatAddFish === 'function' && window.habitatAddFish();");
     }
 
+    // One fish into the tank right under a point on the screen.
+    public void AddFishPhysical(Point physPoint)
+    {
+        if (!_loaded || _rate <= 0) return;
+        var (x, y) = ToCss(physPoint);
+        _ = _webView.ExecuteScriptAsync($"typeof window.habitatAddFish === 'function' && window.habitatAddFish({x}, {y});");
+    }
+
+    private (string X, string Y) ToCss(Point physPoint)
+    {
+        double cssX = (physPoint.X - _screen.Bounds.Left) * _cssScale;
+        double cssY = (physPoint.Y - _screen.Bounds.Top) * _cssScale;
+        return (cssX.ToString("F1", CultureInfo.InvariantCulture), cssY.ToString("F1", CultureInfo.InvariantCulture));
+    }
+
+    // A drag over the tank. The scene decides what a drag that starts is for: begun on the
+    // fish it is holding selected it picks them up ("herd"), anywhere else it draws a marquee
+    // ("select"). Points may lie off this screen; a marquee spanning monitors is shared.
+    public async Task<string> BeginDragPhysical(Point start, Point current)
+    {
+        if (!_loaded || _rate <= 0) return "none";
+        try
+        {
+            var result = await _webView.ExecuteScriptAsync(DragScript("start", start, current));
+            return result.Trim('"');
+        }
+        catch
+        {
+            return "none";
+        }
+    }
+
+    // "move", "end" or "cancel".
+    public void DragPhysical(string phase, Point start, Point current)
+    {
+        if (!_loaded) return;
+        _ = _webView.ExecuteScriptAsync(DragScript(phase, start, current));
+    }
+
+    private string DragScript(string phase, Point start, Point current)
+    {
+        var (x0, y0) = ToCss(start);
+        var (x, y) = ToCss(current);
+        return $"typeof window.habitatDrag === 'function' ? window.habitatDrag({{ phase: '{phase}', x0: {x0}, y0: {y0}, x: {x}, y: {y} }}) : 'none';";
+    }
+
     public bool SetRate(int wanted)
     {
         if (wanted == _rate) return false;
@@ -297,45 +343,6 @@ public class WallpaperWindow : Form
         _ = _webView.ExecuteScriptAsync($"typeof window.habitatMode === 'function' && window.habitatMode('{_fishBehaviour}');");
     }
 
-    public void SelectPhysical(Point? physStart, Point? physCurrent)
-    {
-        if (!_loaded || _rate <= 0) return;
-
-        if (physStart == null || physCurrent == null)
-        {
-            _ = _webView.ExecuteScriptAsync("typeof window.habitatSelect === 'function' && window.habitatSelect(null);");
-            return;
-        }
-
-        int minX = Math.Min(physStart.Value.X, physCurrent.Value.X);
-        int maxX = Math.Max(physStart.Value.X, physCurrent.Value.X);
-        int minY = Math.Min(physStart.Value.Y, physCurrent.Value.Y);
-        int maxY = Math.Max(physStart.Value.Y, physCurrent.Value.Y);
-
-        int clipMinX = Math.Max(minX, _screen.Bounds.Left);
-        int clipMaxX = Math.Min(maxX, _screen.Bounds.Right);
-        int clipMinY = Math.Max(minY, _screen.Bounds.Top);
-        int clipMaxY = Math.Min(maxY, _screen.Bounds.Bottom);
-
-        if (clipMinX >= clipMaxX || clipMinY >= clipMaxY)
-        {
-            _ = _webView.ExecuteScriptAsync("typeof window.habitatSelect === 'function' && window.habitatSelect(null);");
-            return;
-        }
-
-        double cssX0 = (clipMinX - _screen.Bounds.Left) * _cssScale;
-        double cssY0 = (clipMinY - _screen.Bounds.Top) * _cssScale;
-        double cssX1 = (clipMaxX - _screen.Bounds.Left) * _cssScale;
-        double cssY1 = (clipMaxY - _screen.Bounds.Top) * _cssScale;
-
-        var x0 = cssX0.ToString("F1", CultureInfo.InvariantCulture);
-        var y0 = cssY0.ToString("F1", CultureInfo.InvariantCulture);
-        var x1 = cssX1.ToString("F1", CultureInfo.InvariantCulture);
-        var y1 = cssY1.ToString("F1", CultureInfo.InvariantCulture);
-
-        _ = _webView.ExecuteScriptAsync($"typeof window.habitatSelect === 'function' && window.habitatSelect({{ x0: {x0}, y0: {y0}, x1: {x1}, y1: {y1} }});");
-    }
-
     public void SetPlayMode(bool active)
     {
         _playModeActive = active;
@@ -344,39 +351,10 @@ public class WallpaperWindow : Form
         _ = _webView.ExecuteScriptAsync($"typeof window.habitatPlayMode === 'function' && window.habitatPlayMode({act});");
     }
 
-    public void HerdPhysical(bool active, Point physPoint)
-    {
-        if (!_loaded || _rate <= 0) return;
-        double cssX = (physPoint.X - _screen.Bounds.Left) * _cssScale;
-        double cssY = (physPoint.Y - _screen.Bounds.Top) * _cssScale;
-        var x = cssX.ToString("F1", CultureInfo.InvariantCulture);
-        var y = cssY.ToString("F1", CultureInfo.InvariantCulture);
-        var act = active ? "true" : "false";
-        _ = _webView.ExecuteScriptAsync($"typeof window.habitatHerd === 'function' && window.habitatHerd({{ active: {act}, x: {x}, y: {y} }});");
-    }
-
     public void ClearSelection()
     {
         if (!_loaded) return;
         _ = _webView.ExecuteScriptAsync("typeof window.habitatSelect === 'function' && window.habitatSelect('clear');");
-    }
-
-    public async Task<int> GetSelectedFishCountAsync()
-    {
-        if (!_loaded) return 0;
-        try
-        {
-            var res = await _webView.ExecuteScriptAsync("window.habitatSelectedCount || 0;");
-            if (int.TryParse(res, NumberStyles.Integer, CultureInfo.InvariantCulture, out int count))
-            {
-                return count;
-            }
-        }
-        catch
-        {
-            // Ignore execution errors
-        }
-        return 0;
     }
 
     private void SendState()

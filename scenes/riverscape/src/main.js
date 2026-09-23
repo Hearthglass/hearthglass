@@ -76,8 +76,13 @@ window.habitatPlayMode = (active) => {
 window.habitatHerd = (state) => {
   changeHerd?.(state);
 };
-// One more fish into still-moving water; false if the water is still or the tank is full.
-window.habitatAddFish = () => Boolean(loop?.state.running && fishSchool?.addFish());
+// One more fish into still-moving water, at a point on the page (CSS pixels) when given;
+// false if the water is still or the tank is full.
+window.habitatAddFish = (x, y) => Boolean(loop?.state.running && fishSchool?.addFish(x, y));
+// A drag on the page from the host: { phase: "start" | "move" | "end" | "cancel", x0, y0,
+// x, y } in CSS pixels. Starting on the held selection picks it up and carries it; anywhere
+// else draws a selection marquee. Answers "herd", "select" or "none".
+window.habitatDrag = (gesture) => (loop?.state.running && fishSchool ? fishSchool.drag(gesture) : "none");
 Object.defineProperty(window, 'habitatSelectedCount', {
   get: () => fishSchool?.selectedFish?.length || 0,
   configurable: true,
@@ -287,13 +292,13 @@ async function start() {
     pointer = null;
   });
 
-  // Clicking the water drops a pinch of food where the click was. The ray is cast again
-  // here rather than reusing the hovering pointer, because a touch or a pen presses
-  // before it ever moves and there would be nothing to reuse. Only the horizontal place
-  // is taken from the click: food is sprinkled onto the surface wherever it landed, and
-  // how far back in the tank each pellet falls is food.js's own business, since a click
-  // can only ever say two of the three things.
+  // Clicking the water puts a pinch of food in right where the click was. The ray is cast
+  // again here rather than reusing the hovering pointer, because a touch or a pen presses
+  // before it ever moves and there would be nothing to reuse. A click can only say two of
+  // the three things, so the pinch goes in where the click's line of sight crosses the
+  // middle of the open water, in front of the planting.
   const dropPoint = new THREE.Vector3();
+  const feedPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -1.2);
   canvas.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !event.isPrimary || !loop?.state.running) return;
     const bounds = canvas.getBoundingClientRect();
@@ -304,7 +309,8 @@ async function start() {
       ),
       camera,
     );
-    if (raycaster.ray.intersectPlane(waterPlane, dropPoint)) food.drop(dropPoint);
+    if (raycaster.ray.intersectPlane(feedPlane, dropPoint))
+      food.drop(dropPoint, undefined, { submerged: true });
   });
   // The same pinch without a click, for the wallpaper's menu: the cursor is up in the
   // menu bar at that moment, so the food goes over the open middle of the tank instead,

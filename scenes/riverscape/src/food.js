@@ -26,8 +26,10 @@ import { shelteredVelocity, waterLitShader } from "./water.js";
 // Dusek & Bouchet 2004, doi:10.1017/S0022112004009164). An irregular grain has no
 // preferred axis, so it turns slowly about a fixed one and glides a few degrees off
 // vertical, and that is all.
+// The pellets are drawn about half again their true size: at a true millimetre a pinch is
+// two or three pixels on a desktop and reads as nothing having happened.
 const PELLET = {
-  radius: [0.0105, 0.014],
+  radius: [0.017, 0.022],
   sink: [0.33, 0.47],
   float: [2.2, 4.5],
   lingerChance: 0.15,
@@ -48,6 +50,9 @@ const PELLET = {
 // spend its whole float phase out of sight; the fish's own ceiling is the visible film.
 const FILM = 8.15;
 const PINCH = { x: 0.26, minZ: -0.6, maxZ: 2.2 };
+// A pinch put straight into the water where it was clicked: a small cloud, already wet,
+// sinking a little slower than a pellet that has fallen from the film.
+const CLOUD = { x: 0.22, y: 0.14, z: 0.4, sink: 0.7, minY: 1.2 };
 // The water the food may occupy: glass on three sides, sand below. A pellet carried into
 // the glass by the current stops against it and sinks there instead of leaving the tank.
 const TANK = { minX: -8.2, maxX: 8.2, minZ: -4.5, maxZ: 3.0 };
@@ -106,11 +111,24 @@ export function createFood(scene, { thickets = [] } = {}) {
   // downstream of them for free. Depth is chosen here rather than taken from the pointer,
   // which can only give two dimensions, and is kept in the open water so a fish can reach
   // every pellet without fighting the glass.
-  function drop(point, count = PELLET.perPinch) {
+  //
+  // With `submerged`, the pinch goes in at the point itself -- where it was clicked, depth
+  // and all -- rather than onto the film above it.
+  function drop(point, count = PELLET.perPinch, { submerged = false } = {}) {
     let at = elapsed;
+    const inWater = submerged && point.y < FILM - 0.1;
     for (let i = 0; i < count; i++) {
       if (pellets.length + pending.length >= PELLET.capacity) break;
       at += range(PELLET.stagger[0], PELLET.stagger[1]);
+      if (inWater) {
+        pending.push({
+          at,
+          x: THREE.MathUtils.clamp(point.x + range(-CLOUD.x, CLOUD.x), TANK.minX + 0.5, TANK.maxX - 0.5),
+          y: THREE.MathUtils.clamp(point.y + range(-CLOUD.y, CLOUD.y), CLOUD.minY, FILM - 0.05),
+          z: THREE.MathUtils.clamp(point.z + range(-CLOUD.z, CLOUD.z), TANK.minZ + 0.4, TANK.maxZ - 0.3),
+        });
+        continue;
+      }
       pending.push({
         at,
         x: THREE.MathUtils.clamp(
@@ -123,11 +141,12 @@ export function createFood(scene, { thickets = [] } = {}) {
     }
   }
 
-  function spawn({ x, z }) {
-    const lingering = random() < PELLET.lingerChance;
+  function spawn({ x, y, z }) {
+    const wet = y !== undefined;
+    const lingering = !wet && random() < PELLET.lingerChance;
     const pellet = {
       serial: serial++,
-      position: new THREE.Vector3(x, FILM, z),
+      position: new THREE.Vector3(x, wet ? y : FILM, z),
       velocity: new THREE.Vector3(),
       // How much a fish has already pushed this pellet about. One pass, or one missed
       // strike, can only move it so far; the allowance comes back over several seconds,
@@ -146,16 +165,18 @@ export function createFood(scene, { thickets = [] } = {}) {
       glide: new THREE.Vector3(range(-1, 1), 0, range(-1, 1))
         .normalize()
         .multiplyScalar(range(0, PELLET.glide)),
-      sink: range(PELLET.sink[0], PELLET.sink[1]),
+      sink: range(PELLET.sink[0], PELLET.sink[1]) * (wet ? CLOUD.sink : 1),
       // How long this pellet lasts from the moment it touches the water, whatever it is
       // doing when the time comes. A pellet that draws a long float can reach the end of
       // its life still on the surface and break up there without ever having sunk, which
       // is what a dry pellet that never properly wets actually does.
       bornAt: elapsed,
       life: range(PELLET.life[0], PELLET.life[1]),
-      wetAt: lingering
-        ? elapsed + range(PELLET.linger[0], PELLET.linger[1])
-        : elapsed + PELLET.float[0] + exponential(PELLET.float[1]),
+      wetAt: wet
+        ? elapsed
+        : lingering
+          ? elapsed + range(PELLET.linger[0], PELLET.linger[1])
+          : elapsed + PELLET.float[0] + exponential(PELLET.float[1]),
       bob: range(0, Math.PI * 2),
       settledAt: 0,
       gone: false,
