@@ -814,7 +814,7 @@ export function createParticles(scene, { thickets }) {
   // At wallpaper size every fleck in the beam is a separate moving pixel, and hundreds of
   // them over the planting read as static rather than as water; a sparse few read as water.
   const debris = 260,
-    bubbles = 70,
+    bubbles = 420,
     count = debris + bubbles;
   const positions = new Float32Array(count * 3),
     seeds = new Float32Array(count),
@@ -823,18 +823,25 @@ export function createParticles(scene, { thickets }) {
   for (let i = 0; i < count; i++) {
     const bubble = i >= debris;
     if (bubble) {
-      const bed = thickets.length ? thickets[i % thickets.length] : null;
-      if (bed && i % 3 !== 0)
+      const stream = i - debris;
+      // Bursts from each thicket on staggered seeds, a CO₂ stream at the left rear,
+      // and a few pearls off the open sand.
+      if (stream < 280 && thickets.length) {
+        const bed = thickets[stream % thickets.length];
         positions.set(
-          [range(bed.minX, bed.maxX), range(1.5, 6.5), range(bed.minZ, bed.maxZ)],
+          [range(bed.minX, bed.maxX), range(1.2, 5.8), range(bed.minZ, bed.maxZ)],
           i * 3,
         );
-      else {
+        sizes[i] = range(0.022, 0.055);
+      } else if (stream < 360) {
+        positions.set([range(-8.6, -7.8), range(0.25, 1.1), range(-3.4, -2.4)], i * 3);
+        sizes[i] = range(0.018, 0.04);
+      } else {
         const x = range(-7, 7),
           z = range(-1.5, 2.6);
         positions.set([x, groundHeight(x, z) + 0.1, z], i * 3);
+        sizes[i] = range(0.03, 0.075);
       }
-      sizes[i] = range(0.03, 0.075);
     } else {
       positions.set([range(-9, 9), range(0.4, 9.6), range(-5.4, 3.4)], i * 3);
       // Mostly fine suspended matter, with an occasional larger fragment catching light.

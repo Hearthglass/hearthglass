@@ -46,10 +46,20 @@ const SHOALS=[
 // Visual gait controls, not a species-specific hydrodynamic calibration. Frequency is
 // derived from through-water speed / body length / stride, with no high resting floor.
 // Modest propulsion bouts alternate with low-drag coasts; pectorals do the hovering.
+export const ADDABLE=[
+  {id:'chromis',label:'chromis'},
+  {id:'anthias',label:'anthias'},
+  {id:'gramma',label:'royal gramma'},
+  {id:'firefish',label:'firefish'},
+  {id:'wrasse',label:'sixline wrasse'},
+];
 export const GAIT={
   clown:{length:.98,stride:.70,thrust:2.7,drag:.45,bout:[.7,1.1],glide:[.7,1.3],idle:.18,slip:.22,turn:1.65,pectoral:1.8,tail:.24},
   chromis:{length:.82,stride:.68,thrust:2.5,drag:.32,bout:[.65,1.05],glide:[.8,1.65],idle:.17,slip:.12,turn:1.75,pectoral:1.65,tail:1},
   anthias:{length:1.14,stride:.68,thrust:2.2,drag:.29,bout:[.70,1.15],glide:[.9,1.8],idle:.17,slip:.12,turn:1.55,pectoral:1.5,tail:1},
+  gramma:{length:.72,stride:.62,thrust:2.3,drag:.38,bout:[.6,.95],glide:[.7,1.4],idle:.16,slip:.14,turn:1.85,pectoral:1.7,tail:.8},
+  firefish:{length:.90,stride:.66,thrust:2.4,drag:.30,bout:[.7,1.1],glide:[.9,1.7],idle:.17,slip:.12,turn:1.6,pectoral:1.55,tail:.9},
+  wrasse:{length:.78,stride:.64,thrust:2.6,drag:.33,bout:[.55,.95],glide:[.6,1.3],idle:.16,slip:.13,turn:1.9,pectoral:1.75,tail:.85},
 };
 
 // The cleaner shrimp's own tunables. One unit is 10 cm and the modelled animal is about 0.9
@@ -176,15 +186,18 @@ export class ReefSimulation {
     }
     f.goal.copy(f.position);this.fish.push(f);return f;
   }
-  // One more chromis or anthias, even odds, swimming in from a side of the tank to its shoal.
+  // One more reef fish. `kind` pins a species; otherwise even odds among the addable set.
   // Null once ADD_LIMIT have been added. A side with rock at the edge falls back to the
   // shoal's own water, as a new fish at construction does.
   // Given a point on the page (CSS px) it appears there, along that line of sight in open
   // water, and grows in from a speck; where the line only meets rock it comes from a side.
-  addFish(x,y){
+  addFish(x,y,kind){
     if(this.fish.length>=this.limit)return null;
-    const r=this.random,kind=r()<.5?'chromis':'anthias',shoal=kind==='anthias'?2:r()<.5?0:1,rank=this.fish.filter(f=>f.kind===kind).length;
-    const f=this.add(kind,null,(kind==='chromis'?.63+r()*.13:.66+r()*.09),rank,shoal),side=r()<.5?-1:1;
+    const r=this.random,pick=ADDABLE.find(k=>k.id===kind)?.id||ADDABLE[Math.floor(r()*ADDABLE.length)].id;
+    const shoal=pick==='anthias'||pick==='wrasse'?2:pick==='gramma'||pick==='firefish'?0:r()<.5?0:1;
+    const size=pick==='chromis'?.63+r()*.13:pick==='anthias'?.66+r()*.09:pick==='gramma'?.58+r()*.10:pick==='firefish'?.62+r()*.10:.56+r()*.10;
+    const rank=this.fish.filter(f=>f.kind===pick).length;
+    const f=this.add(pick,null,size,rank,shoal),side=r()<.5?-1:1;
     let placed=false;
     if(x!==undefined&&y!==undefined)for(const depth of [2.6,3.4,1.8,4.2,1.0]){
       if(!this.screenToTank(x,y,depth,this._delta))break;

@@ -85,6 +85,42 @@ const SPECIES={
     pectoral:{base:[[.248,.30],[.282,.00],[.316,-.30]],tip:[[.348,.020,.074],[.416,-.026,.092],[.462,-.106,.088],[.428,-.166,.066],[.356,-.148,.046]]},
     pelvic:{base:[[.340,-.88],[.375,-.98]],tip:[[.408,-.268,.032],[.476,-.336,.038],[.526,-.284,.024]]},
   },
+  gramma:{
+    len:.72,
+    back:[.020,.082,.148,.176,.184,.176,.154,.122,.086,.054,.030],
+    belly:[.018,.078,.140,.168,.176,.168,.144,.108,.074,.046,.026],
+    half:[.010,.036,.048,.054,.055,.050,.042,.032,.022,.014,.008],
+    eye:{u:.122,v:.34,r:.038},scales:[28,11],cheek:.14,veil:[.70,.40],
+    dorsal:{from:.210,to:.820,sink:.012,reach:[.034,.070,.074,.070,.068,.078,.086,.056,.018]},
+    anal:{from:.590,to:.835,sink:.010,reach:[.030,.070,.082,.060,.018]},
+    caudal:[[-.520,.170,0],[-.560,.150,0],[-.590,.110,0],[-.608,.052,0],[-.616,0,0],[-.608,-.050,0],[-.590,-.108,0],[-.560,-.148,0],[-.520,-.168,0]],
+    pectoral:{base:[[.258,.30],[.290,.00],[.322,-.30]],tip:[[.354,.016,.062],[.418,-.022,.078],[.456,-.090,.074],[.424,-.138,.054],[.358,-.124,.038]]},
+    pelvic:{base:[[.350,-.88],[.384,-.98]],tip:[[.412,-.230,.026],[.472,-.282,.032],[.514,-.238,.020]]},
+  },
+  firefish:{
+    len:.90,
+    back:[.014,.058,.102,.126,.136,.132,.118,.096,.070,.046,.026],
+    belly:[.014,.056,.098,.120,.128,.122,.106,.084,.058,.038,.022],
+    half:[.006,.024,.034,.038,.040,.038,.032,.026,.018,.012,.007],
+    eye:{u:.108,v:.32,r:.032},scales:[36,10],cheek:.10,veil:[.62,.28],
+    dorsal:{from:.185,to:.830,sink:.010,reach:[.120,.086,.070,.062,.060,.068,.078,.054,.016]},
+    anal:{from:.600,to:.845,sink:.009,reach:[.024,.058,.070,.052,.016]},
+    caudal:[[-.620,.156,0],[-.668,.138,0],[-.704,.096,0],[-.726,.046,0],[-.736,0,0],[-.726,-.044,0],[-.704,-.094,0],[-.668,-.136,0],[-.620,-.154,0]],
+    pectoral:{base:[[.246,.30],[.278,.00],[.310,-.30]],tip:[[.342,.014,.058],[.404,-.020,.072],[.442,-.086,.068],[.412,-.130,.050],[.348,-.116,.036]]},
+    pelvic:{base:[[.338,-.88],[.372,-.98]],tip:[[.402,-.214,.024],[.456,-.262,.028],[.496,-.220,.018]]},
+  },
+  wrasse:{
+    len:.78,
+    back:[.016,.068,.118,.144,.154,.150,.136,.110,.078,.050,.028],
+    belly:[.016,.066,.114,.140,.150,.144,.126,.098,.068,.044,.026],
+    half:[.008,.032,.044,.050,.052,.048,.040,.032,.022,.014,.008],
+    eye:{u:.118,v:.33,r:.034},scales:[30,12],cheek:.12,veil:[.66,.34],
+    dorsal:{from:.200,to:.840,sink:.011,reach:[.032,.066,.070,.068,.066,.074,.082,.056,.016]},
+    anal:{from:.580,to:.845,sink:.010,reach:[.026,.062,.074,.056,.016]},
+    caudal:[[-.540,.164,0],[-.582,.142,0],[-.612,.100,0],[-.628,.048,0],[-.636,0,0],[-.628,-.046,0],[-.612,-.098,0],[-.582,-.140,0],[-.540,-.162,0]],
+    pectoral:{base:[[.250,.30],[.282,.00],[.314,-.30]],tip:[[.348,.016,.060],[.412,-.022,.076],[.450,-.092,.072],[.418,-.140,.052],[.354,-.126,.038]]},
+    pelvic:{base:[[.344,-.88],[.378,-.98]],tip:[[.408,-.222,.026],[.466,-.274,.030],[.508,-.232,.020]]},
+  },
 };
 const axis=(kind,u)=>SNOUT-u*SPECIES[kind].len;
 // A cubic Hermite through the knots with central-difference tangents, so the profile has
@@ -264,6 +300,30 @@ const SKIN={
     vec3 male=mix(vec3(.62,.070,.190),vec3(.74,.250,.130),smoothstep(.13,.46,u));
     male=mix(male,vec3(.66,.105,.205),smoothstep(.60,.94,u));
     skin=mix(skin,mix(male,male*vec3(1.22,.88,1.18),smoothstep(.54,1.,band)),vTrim.y);`,
+  gramma:`
+    // Royal gramma: violet from the snout through the trunk, a soft blend, then a
+    // chrome-yellow tail half. The eye sits in the purple, rimmed gold.
+    vec3 skin=mix(vec3(.28,.045,.62),vec3(.42,.08,.78),smoothstep(.08,.40,band));
+    skin=mix(skin,vec3(.16,.04,.40),smoothstep(0.,.18,band)*.45);
+    float blend=smoothstep(.42,.62,u);
+    vec3 gold=mix(vec3(.92,.62,.04),vec3(.98,.82,.18),smoothstep(.40,.95,band));
+    skin=mix(skin,gold,blend);
+    skin*=1.-.18*(1.-smoothstep(0.,.12,band));`,
+  firefish:`
+    // Firefish: pale anterior, a yellow saddle, then a wine-red rear and tail.
+    vec3 skin=mix(vec3(.86,.84,.78),vec3(.94,.90,.72),smoothstep(.10,.45,band));
+    skin=mix(skin,vec3(.92,.70,.12),smoothstep(.28,.52,u));
+    skin=mix(skin,vec3(.72,.12,.08),smoothstep(.52,.78,u));
+    skin=mix(skin,vec3(.42,.05,.06),smoothstep(.78,1.,u));
+    skin=mix(skin,skin*vec3(1.08,1.02,.90),smoothstep(.55,.95,band)*.4);`,
+  wrasse:`
+    // Sixline wrasse: orange-brown with six thin blue-violet stripes along the flank.
+    vec3 skin=mix(vec3(.78,.28,.04),vec3(.92,.48,.10),smoothstep(.08,.42,band));
+    skin=mix(skin,vec3(.96,.70,.28),smoothstep(.55,.95,band));
+    float stripe=0.;
+    for(int i=0;i<6;i++)stripe=max(stripe,exp(-pow((band-(.16+.12*float(i)))/.028,2.)));
+    skin=mix(skin,vec3(.18,.22,.72),stripe*.85);
+    skin*=1.-.12*(1.-smoothstep(0.,.12,band));`,
 };
 // Fin membranes: the pigment across the span, hinge (0) to free margin (1). `tail`,
 // `below`, `paired` and `pelvic` name which fin this fragment is on, because the median
@@ -297,10 +357,20 @@ const FINS={
     web=mix(web,mix(vec3(.90,.155,.155),vec3(.50,.075,.290),smoothstep(.45,1.,span)),vTrim.y*(.50+.44*tail));
     web=mix(web,vec3(.115,.140,.40),vTrim.y*below*(1.-tail)*.62);
     web=mix(web,vec3(.82,.045,.030),vTrim.y*(paired-pelvic)*smoothstep(.22,.74,span));`,
+  gramma:`
+    vec3 web=mix(vec3(.36,.08,.70),vec3(.94,.72,.10),smoothstep(.30,.90,axial));
+    web=mix(web,vec3(.98,.80,.16),tail*smoothstep(.20,1.,span));`,
+  firefish:`
+    vec3 web=mix(vec3(.90,.82,.55),vec3(.70,.14,.08),smoothstep(.25,.85,axial));
+    web=mix(web,vec3(.50,.06,.06),tail*smoothstep(.30,1.,span));
+    web=mix(web,vec3(.95,.88,.70),(1.-tail)*(1.-smoothstep(.40,.90,span))*.5);`,
+  wrasse:`
+    vec3 web=mix(vec3(.86,.36,.06),vec3(.94,.58,.16),span);
+    web=mix(web,vec3(.20,.24,.70),tail*smoothstep(.55,1.,span)*.45);`,
 };
 // Guanine platelets under the scales: a thin-film flare that only shows off normal. It is
 // the whole point of a chromis and barely there on the barred clownfish.
-const SHEEN={clown:'vec3(.080,.085,.125)',chromis:'vec3(.090,.330,.430)',anthias:'vec3(.230,.100,.290)'};
+const SHEEN={clown:'vec3(.080,.085,.125)',chromis:'vec3(.090,.330,.430)',anthias:'vec3(.230,.100,.290)',gramma:'vec3(.180,.070,.320)',firefish:'vec3(.160,.080,.070)',wrasse:'vec3(.140,.090,.220)'};
 // The iris is the fastest species mark at tank distance. percula's is bright orange, and
 // ocellaris' greyish one is exactly how the trade tells the two apart; a damsel's is a
 // silver ring round a large dark pupil; both sexes of sea goldie carry the metallic
@@ -309,6 +379,9 @@ const EYE={
   clown:'vec3 iris=vec3(.90,.380,.030),rim=vec3(.10,.035,.012);',
   chromis:'vec3 iris=vec3(.52,.58,.56),rim=vec3(.030,.110,.120);',
   anthias:'vec3 iris=vec3(.86,.560,.120),rim=mix(vec3(.40,.16,.42),vec3(.46,.10,.20),vTrim.y);',
+  gramma:'vec3 iris=vec3(.20,.08,.42),rim=vec3(.86,.62,.08);',
+  firefish:'vec3 iris=vec3(.78,.62,.18),rim=vec3(.42,.10,.06);',
+  wrasse:'vec3 iris=vec3(.18,.22,.38),rim=vec3(.86,.48,.08);',
 };
 
 /** The skin, fin and eye shading for one species. Every animal of that species shares
@@ -323,9 +396,9 @@ function fishMaterial(kind) {
   // percula rows with its pectorals hard enough to drive the whole fish and only folds
   // them in for a caudal burst; the two open-water species use theirs to trim and hover,
   // so their stroke is smaller than the tail that carries them.
-  const stroke=kind==='clown'?[.050,.034]:kind==='chromis'?[.024,.010]:[.030,.014];
+  const stroke=kind==='clown'?[.050,.034]:kind==='chromis'||kind==='gramma'?[.024,.010]:kind==='wrasse'?[.028,.012]:[.030,.014];
   return underwater(new THREE.MeshStandardMaterial({roughness:.38,metalness:.02,side:THREE.DoubleSide,transparent:true,forceSinglePass:true}),{
-    key:`fish-${kind}`,transmission:.085,
+    key:`fish-${kind}`,transmission:.085,caustics:'lite',
     vertex:`attribute float part;attribute vec4 aFishTrim;attribute vec4 aFishGait;varying float vPart;varying vec3 vAnatomy;varying vec2 vSkinUv;varying vec2 vTrim;varying float vHighlight;
       #define fishTrim aFishTrim
       #define fishGait aFishGait
@@ -343,12 +416,13 @@ function fishMaterial(kind) {
         transformed.z+=sign(position.z)*row*hinge*${n(stroke[0])};
         transformed.x-=row*hinge*hinge*${n(stroke[1])};
       }
-      ${kind==='anthias'?`// Both sexes carry the lyre and a prolonged third dorsal spine; on the terminal
+      ${kind==='anthias'||kind==='firefish'?`// Both sexes carry the lyre and a prolonged third dorsal spine; on the terminal
       // male the lobe tips run out a little further and that spine stands about twice the
-      // fin height, not the whips the species is often drawn with.
+      // fin height, not the whips the species is often drawn with. Firefish keep a single
+      // tall first spine as their banner.
       if(part>.5&&part<1.5){
         if(position.x<${n(axis(kind,1))}){float lobe=uv.y*uv.y*smoothstep(.12,.24,abs(position.y));transformed.x-=fishTrim.w*.12*lobe;transformed.y+=sign(position.y)*fishTrim.w*.035*lobe;}
-        else if(position.y>.10){float spine=uv.y*uv.y*exp(-pow((uv.x-.150)/.034,2.));transformed.y+=(.045+.11*fishTrim.w)*spine;transformed.x-=.05*fishTrim.w*spine;}
+        else if(position.y>.10){float spine=uv.y*uv.y*exp(-pow((uv.x-${kind==='firefish'?'.04':'.150'})/.034,2.));transformed.y+=(${kind==='firefish'?'.10':'.045'}+${kind==='firefish'?'.02':'.11'}*fishTrim.w)*spine;transformed.x-=.05*fishTrim.w*spine;}
       }`:''}`,
     fragment:`varying float vPart;varying vec3 vAnatomy;varying vec2 vSkinUv;varying vec2 vTrim;varying float vHighlight;`,
     color:`
@@ -437,7 +511,7 @@ export function createFishSchool(scene,simulation){
   // Each species' buffers hold every fish it could have after additions (simulation.limit),
   // so adding one only raises mesh.count.
   const capacity=simulation.limit||simulation.fish.length;
-  for(const kind of ['clown','chromis','anthias']){
+  for(const kind of ['clown','chromis','anthias','gramma','firefish','wrasse']){
     const fish=simulation.fish.filter(f=>f.kind===kind),geometry=makeFishGeometry(kind),room=kind==='clown'?fish.length:capacity;
     const data=new Float32Array(room*4),attribute=new THREE.InstancedBufferAttribute(data,4).setUsage(THREE.DynamicDrawUsage);
     const gait=new Float32Array(room*4),gaitAttribute=new THREE.InstancedBufferAttribute(gait,4).setUsage(THREE.DynamicDrawUsage);
@@ -447,7 +521,7 @@ export function createFishSchool(scene,simulation){
     // carries relative size, because percula's black borders broaden with age and the
     // biggest fish on an anemone is the blackest. Trim w marks the sexed-up individual:
     // the terminal male anthias, and the chromis holding the nest.
-    const largest=Math.max(...fish.map(f=>f.size));
+    const largest=fish.length?Math.max(...fish.map(f=>f.size)):1;
     const trim=(f,i)=>[kind==='clown'?f.size/largest:(i*.6180339887+.31)%1,(kind==='anthias'||kind==='chromis')&&f.rank===0?1:0];
     groups.push({kind,fish,data,attribute,gait,gaitAttribute,mesh,trim:fish.map(trim),trimOf:trim});
   }

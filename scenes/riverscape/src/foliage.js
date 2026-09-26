@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { range, smoothstep, vec } from "./math.js";
+import { range, screenSteps, smoothstep, vec } from "./math.js";
 import { FLOW_DIRECTION, currentGLSL, waterLitShader, waterTime } from "./water.js";
 
 // Shared foliage construction: the current model in the vertex stage, the submerged
@@ -33,10 +33,16 @@ const strandVertex = /* glsl */ `
     float envelope = gain * safeS * sPower;
     float envelopeSlope = gain * 1.3 * sPower;
     float theta = waterTime * 0.95 - 1.05 * s + phase;
+#ifdef FOLIAGE_CHEAP
+    float shape = sin(theta);
+    float wave = envelope * shape;
+    float waveSlope = envelopeSlope * shape - envelope * 1.05 * cos(theta);
+#else
     float ripple = waterTime * 1.55 - 1.7 * s + phase * 2.3;
     float shape = sin(theta) + 0.3 * sin(ripple);
     float wave = envelope * shape;
     float waveSlope = envelopeSlope * shape - envelope * (1.05 * cos(theta) + 0.51 * cos(ripple));
+#endif
     return vec2(bendAmount + wave, bendSlope + waveSlope);
   }
   vec2 gMotion;
@@ -53,18 +59,26 @@ const strandPosition = /* glsl */ `
 // Submerged leaves show almost no specular reflection: leaf tissue and water have
 // nearly the same refractive index, so what reaches the eye is diffuse reflection
 // and light transmitted through the thin blade.
-export function foliageMaterial() {
-  const material = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff,
-    roughness: 0.58,
-    metalness: 0,
-    specularIntensity: 0.07,
-    side: THREE.DoubleSide,
-    vertexColors: true,
-    alphaToCoverage: true,
-  });
+export function foliageMaterial({ cheap = false, coverage = true } = {}) {
+  const material = cheap
+    ? new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.78,
+        metalness: 0,
+        side: THREE.DoubleSide,
+        vertexColors: true,
+      })
+    : new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        roughness: 0.58,
+        metalness: 0,
+        specularIntensity: 0.07,
+        side: THREE.DoubleSide,
+        vertexColors: true,
+        alphaToCoverage: coverage,
+      });
   material.onBeforeCompile = (shader) => {
-    shader.vertexShader = strandVertex + shader.vertexShader;
+    shader.vertexShader = (cheap ? "#define FOLIAGE_CHEAP\n" : "") + strandVertex + shader.vertexShader;
     shader.vertexShader = shader.vertexShader
       .replace("#include <beginnormal_vertex>", strandNormal)
       .replace(
@@ -77,9 +91,10 @@ export function foliageMaterial() {
     shader.fragmentShader =
       `varying vec2 leafUv; varying vec3 leafPosition; varying float vThin;
     ` + shader.fragmentShader;
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <color_fragment>",
-      /* glsl */ `#include <color_fragment>
+    if (!cheap) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        /* glsl */ `#include <color_fragment>
       // With multisampling a pixel is shaded once, at its centre, whenever any of its
       // samples touches the leaf. On a needle narrower than a pixel that centre lies off
       // the leaf, so the leaf coordinate is extrapolated well outside 0..1, the edge term
@@ -103,10 +118,10 @@ export function foliageMaterial() {
       // ribbon leaves pass a quarter of the light, their thinner edges half.
       diffuseColor.a = vThin < .7 ? 1.0 : (edge > .45 ? .5 : .75);
     `,
-    );
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <normal_fragment_maps>",
-      /* glsl */ `#include <normal_fragment_maps>
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <normal_fragment_maps>",
+        /* glsl */ `#include <normal_fragment_maps>
       float rib = exp(-pow((leafSurface.x-.5)*60.,2.))*.0015;
       float veinHeight = pow(max(0.,.5+.5*cos((leafSurface.y-abs(leafSurface.x-.5)*.32)*155.)),16.)*.00025;
       float detailFade = 1.-smoothstep(.003,.012,max(fwidth(leafUv.x),fwidth(leafUv.y)));
@@ -123,22 +138,30 @@ export function foliageMaterial() {
       float bumpedLength=length(bumped);
       if(bumpedLength>1e-30)normal=bumped/bumpedLength;
     `,
-    );
+      );
+    } else {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        /* glsl */ `#include <color_fragment>
+      if (!gl_FrontFacing) diffuseColor.rgb *= vec3(.82, .76, .66);
+    `,
+      );
+    }
     waterLitShader(shader, {
       // Light reaching the far side of a thin leaf is scattered through the tissue, which
       // passes green far more readily than red or blue.
-      perLight: /* glsl */ `
+      perLight: cheap ? "" : /* glsl */ `
         float backLight = saturate(dot(-geometryNormal, lit.direction));
         reflectedLight.directDiffuse += lit.color * backLight * RECIPROCAL_PI * material.diffuseColor * vec3(.55, .85, .30) * (vThin * .9);
       `,
     });
   };
-  material.customProgramCacheKey = () => "aquatic-leaves-v3";
+  material.customProgramCacheKey = () => cheap ? "aquatic-leaves-rear-v1" : `aquatic-leaves-v3${coverage ? "" : "-opaque"}`;
   return material;
 }
 
 // Shadows follow the same motion.
-export function foliageDepth({ animated = true } = {}) {
+export function foliageDepth({ animated = true, cheap = true } = {}) {
   const material = new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking,
     side: THREE.DoubleSide,
@@ -146,14 +169,14 @@ export function foliageDepth({ animated = true } = {}) {
   material.onBeforeCompile = (shader) => {
     // Depth shaders do not pass through waterLitShader, so bind the clock here too.
     if (animated) shader.uniforms.waterTime = waterTime;
-    shader.vertexShader = strandVertex + shader.vertexShader;
+    shader.vertexShader = (cheap ? "#define FOLIAGE_CHEAP\n" : "") + strandVertex + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
       "#include <begin_vertex>",
       `gMotion = strandMotion(anchor, bend.xyz, along.w, bend.w);
       ${strandPosition}`,
     );
   };
-  material.customProgramCacheKey = () => "aquatic-leaf-shadow-v3";
+  material.customProgramCacheKey = () => cheap ? "aquatic-leaf-shadow-cheap-v1" : "aquatic-leaf-shadow-v3";
   return material;
 }
 
@@ -192,6 +215,8 @@ export function blade(
     attached = null,
     browning = 0,
     emit = true,
+    // Background ribbons carry their own budget from the render profile.
+    fit = true,
   } = {},
 ) {
   // Even an omitted background blade consumes its original two random values. This
@@ -206,6 +231,13 @@ export function blade(
         ? new THREE.CubicBezierCurve3(...points)
         : new THREE.CatmullRomCurve3(points);
   const length = curve.getLength();
+  if (fit) {
+    // A step every few pixels along the blade and an even count across it, so the cupped
+    // midline keeps its own column.
+    const middle = curve.getPoint(0.5);
+    rows = screenSteps(middle, length, 6, 3, rows);
+    cols = 2 * screenSteps(middle, 2 * width, 8, 1, cols / 2);
+  }
   const start = batch.positions.length / 3;
   const brown = new THREE.Color("#6b5a2a");
   for (let i = 0; i <= rows; i++) {
@@ -251,8 +283,9 @@ export function blade(
 export function stem(batch, points, radius, color, root, compliance, attached = null) {
   const curve = new THREE.CatmullRomCurve3(points);
   const length = curve.getLength();
-  const rows = Math.max(4, points.length * 3),
-    cols = 5;
+  const middle = curve.getPoint(0.5);
+  const rows = screenSteps(middle, length, 6, 3, Math.max(4, points.length * 3)),
+    cols = screenSteps(middle, TAU * radius, 3, 3, 5);
   const start = batch.positions.length / 3;
   for (let i = 0; i <= rows; i++) {
     const t = i / rows,

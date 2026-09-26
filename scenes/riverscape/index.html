@@ -23,7 +23,7 @@
     <main id="habitat" aria-label="Interactive freshwater aquarium">
       <canvas
         id="scene"
-        aria-label="A planted freshwater aquarium. Move the pointer near fish to interact. Click to feed. Space pauses. F enters fullscreen. H hides controls."
+        aria-label="A planted freshwater aquarium. Move the pointer near fish to interact. Click to feed or add fish. Ctrl+Left and Ctrl+Right switch. Space pauses. F enters fullscreen. H hides controls."
         tabindex="0"
       ></canvas>
       <nav class="chrome" aria-label="Aquariums">
@@ -33,6 +33,7 @@
         <div class="buttons">
           <button disabled id="pause" aria-pressed="false" title="Space">Pause</button>
           <button disabled id="feed">Feed</button>
+          <button disabled id="tool" aria-pressed="false" title="Ctrl+← / Ctrl+→">Click to feed</button>
           <button disabled id="fullscreen" title="F">Fullscreen</button>
         </div>
         <div class="preferences">
@@ -44,6 +45,7 @@
           <button disabled id="hide" title="H">Hide controls</button>
         </div>
       </footer>
+      <div id="tool-status" class="tool-status" role="status" aria-live="polite"></div>
       <button disabled id="show-controls" title="H">Show controls</button>
       <div id="loading" role="status"><p>Loading aquarium…</p></div>
       <div id="error" role="alert" hidden></div>

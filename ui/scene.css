@@ -25,6 +25,10 @@ footer.chrome { bottom: var(--space-6); justify-content: space-between; gap: var
 #show-controls { display: none; position: fixed; z-index: 3; bottom: var(--space-6); right: var(--space-8); background: var(--scrim); }
 .clean .chrome { visibility: hidden; pointer-events: none; }
 .clean #show-controls { display: block; }
+.tool-status { position: fixed; z-index: 2; left: 50%; bottom: calc(var(--space-6) + var(--control-height) + var(--space-6)); transform: translateX(-50%); padding: var(--space-2) var(--space-4); background: var(--scrim); font-size: var(--text-small); pointer-events: none; opacity: 0; transition: opacity .4s var(--motion-ease); }
+.tool-status:not(:empty) { opacity: 1; animation: tool-status-fade 2.8s var(--motion-ease) forwards; }
+@keyframes tool-status-fade { 0%,70% { opacity: 1; } 100% { opacity: 0; } }
+.clean .tool-status, [data-motion="host"] .tool-status { display: none; }
 .capture #show-controls { display: none; }
 [data-motion="host"] .chrome, [data-motion="host"] #show-controls { display: none; }
 #loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--background); pointer-events: none; z-index: 1; transition: opacity var(--motion-duration) var(--motion-ease); }

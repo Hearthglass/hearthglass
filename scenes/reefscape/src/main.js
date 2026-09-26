@@ -1,5 +1,6 @@
 import { QUALITY_PRESETS as presets, qualityName, frameRate, framebufferSize, renderScale } from '../../shared/render-policy.js';
-import { installControls, reportSceneError, preferredQuality } from '../../shared/controls.js';
+import { installControls, reportSceneError, preferredQuality, pointerTools } from '../../shared/controls.js';
+import { createGpuScaler } from '../../shared/gpu-scaler.js';
 import { createComposite } from './composite.js';
 import * as THREE from 'three';
 import { createTerrain, createBackdrop } from './terrain.js';
@@ -8,7 +9,7 @@ import { createAnemone } from './anemone.js';
 import { createFishSchool } from './fish-model.js';
 import { createShrimp } from './shrimp.js';
 import { createParticles } from './particles.js';
-import { ReefSimulation, FIXED_STEP, POPULATIONS } from './simulation.js';
+import { ReefSimulation, FIXED_STEP, POPULATIONS, ADDABLE } from './simulation.js';
 import { views } from './views.js';
 import { createFrameLoop } from '../../shared/frame-loop.js';
 import { waterTime, LAMP, LAMP_RANGE } from './water.js';
@@ -86,7 +87,7 @@ async function start(){
   function applyView(name){const v=views[name];view=name;camera.position.set(...v.position);camera.lookAt(...v.target);camera.fov=v.fov;camera.updateProjectionMatrix();syncPostCamera();}
   // The beauty pass lands in an HDR target; a short screen-space pass adds contact occlusion
   // where rock meets sand and coral meets rock, then a light vignette, before tone mapping.
-  const { target, post, postScene, postCamera } = createComposite(camera,shadow);
+  const { target, post, postScene, postCamera, volumeTarget, blurTarget, resize: resizeComposite, composite } = createComposite(camera,shadow);
   applyView(view);
   const envData=new Uint8Array(128*64*4);
   for(let y=0;y<64;y++)for(let x=0;x<128;x++){
@@ -98,11 +99,13 @@ async function start(){
   const {rockSurface}=await createTerrain(scene);
   await createCorals(scene);
   const anemone=createAnemone(scene);
-  const rockPrepass=new THREE.Scene();
   // Resolve porous rock depth before its expensive material. Hidden inner surfaces
-  // then fail the depth test without sampling the triplanar texture layers.
+  // then fail the depth test without sampling the triplanar texture layers. It sits in
+  // the main scene, drawn first: a second render() into the multisampled target would
+  // resolve the whole frame an extra time.
   const rockDepthMaterial=new THREE.MeshBasicMaterial({colorWrite:false});
-  rockPrepass.add(new THREE.Mesh(rockSurface.geometry,rockDepthMaterial));
+  const rockPrepass=new THREE.Mesh(rockSurface.geometry,rockDepthMaterial);
+  rockPrepass.renderOrder=-1;scene.add(rockPrepass);
   const simulation=new ReefSimulation(undefined,population);simulation.camera=camera;
   changeMode=mode=>simulation.setMode(mode);simulation.setMode(currentMode);
   changeSelection=box=>simulation.setSelection(box,camera);
@@ -114,27 +117,21 @@ async function start(){
   function sync(dt){
     waterTime.value=simulation.time;
     fishSchool.update();
-    shrimp.update();particles.update(dt);
+    shrimp.update();particles.update();
   }
   let loop=null,accumulator=0,frames=0,zeroSize=false;
-  let cpuEMA=0,slowSamples=0,autoScale=1,ratio=1;
+  let cpuEMA=0,ratio=1;
+  const scaler=createGpuScaler(renderer,{capture});
   const running=()=>!disposed&&!paused&&!document.hidden&&!contextLost&&!zeroSize&&hostRate>0;
   const fps=()=>frameRate(quality,hostRate,onBattery);
   function render(){
     if(contextLost||disposed||document.hidden)return;
+    scaler.begin();
     renderer.info.reset();
     renderer.setRenderTarget(target);
-    renderer.clear();
-    renderer.autoClear=false;
-    renderer.render(rockPrepass,camera);
-    // A color background forces a clear even with autoClear disabled.
-    renderer.autoClearDepth=false;
     renderer.render(scene,camera);
-    renderer.autoClear=true;
-    renderer.autoClearDepth=true;
     shadow.reefShadowMap.value=sun.shadow.map.texture;
-    renderer.setRenderTarget(null);
-    renderer.render(postScene,postCamera);
+    composite(renderer);
     frames++;
     if(!loading.hidden)loading.hidden=true;
   }
@@ -145,11 +142,8 @@ async function start(){
     if(steps===6)accumulator=0;
     if(pointer){pointer.speed*=Math.exp(-elapsed*8);}
     sync(steps*FIXED_STEP);render();
+    scaler.end(fps(),elapsed)&&resize(false);
     const cost=performance.now()-before;cpuEMA=cpuEMA?cpuEMA*.96+cost*.04:cost;
-    // Conservative one-way downshift, never an oscillating up/down resolution loop.
-    // CPU render time is only a pressure signal, not a claimed hardware GPU measurement.
-    if(cpuEMA>1000/fps()*.85||elapsed>1.65/fps())slowSamples++;else slowSamples=Math.max(0,slowSamples-1);
-    if(slowSamples>80&&autoScale>.72&&!capture){autoScale=Math.max(.72,autoScale-.10);slowSamples=0;resize(false);}
   }
   let updateControls=()=>{};
   function restart(){
@@ -167,8 +161,9 @@ async function start(){
     zeroSize=!(width>0&&height>0);
     if(zeroSize){restart();return;}
     anemone.setQuality(quality);
-    ratio=renderScale(quality,devicePixelRatio,onBattery)*autoScale;
+    ratio=renderScale(quality,devicePixelRatio,onBattery)*scaler.scale;
     const {width:w,height:h}=framebufferSize(width,height,ratio,renderer.capabilities.maxTextureSize,preset.pixels);ratio=w/width;renderer.setSize(w,h,false);target.setSize(w,h);post.uniforms.size.value.set(w,h);post.uniforms.aoRadiusScale.value=h/972;
+    resizeComposite(w,h);
     camera.aspect=width/height;
     if(view==='wide'){
       const focus=-3.1*Math.min(1,Math.max(0,(1.3-camera.aspect)/.65));
@@ -198,13 +193,17 @@ async function start(){
   // water in front of the reef.
   const feedPlane=new THREE.Plane(new THREE.Vector3(0,0,1),-2.2),feedPoint=new THREE.Vector3();
   canvas.addEventListener('pointerdown',event=>{if(event.button!==0||!running()||!project(event))return;
-    if(raycaster.ray.intersectPlane(feedPlane,feedPoint))simulation.feed(feedPoint.x,feedPoint.z,feedPoint.y);});
+    if(pointerTool.id==='feed'){if(raycaster.ray.intersectPlane(feedPlane,feedPoint))simulation.feed(feedPoint.x,feedPoint.z,feedPoint.y);}
+    else addFish(event.clientX,event.clientY,pointerTool.kind);});
   feed=()=>{if(running())simulation.feed(-2.6+Math.sin(simulation.time*.73)*1.7,1.3);};
-  addFish=(x,y)=>Boolean(running()&&simulation.addFish(x,y));
+  addFish=(x,y,kind)=>Boolean(running()&&simulation.addFish(x,y,kind));
   drag=gesture=>running()?simulation.drag(gesture):'none';
+  let pointerTool={id:'feed'};
   updateControls=installControls({habitat,isPaused:()=>paused,isRunning:running,
     pause:window.habitatPause,feed,quality:()=>quality,
-    setQuality(value){quality=qualityName(value);autoScale=1;resize();restart();},
+    tools:pointerTools(ADDABLE),
+    setTool(tool){pointerTool=tool;},
+    setQuality(value){quality=qualityName(value);scaler.reset();resize();restart();},
   });
   document.addEventListener('visibilitychange',()=>{pointer=null;if(!document.hidden){resize(false);if(paused)render();}restart();});
   const motionQuery=matchMedia('(prefers-reduced-motion: reduce)');motionQuery.addEventListener('change',event=>{if(!isHost&&event.matches){paused=true;restart();}});
@@ -240,7 +239,7 @@ async function start(){
     loop.setHidden(true);if(event.persisted)return;disposed=true;loop.dispose();observer.disconnect();
     const geometries=new Set(),materials=new Set(),textures=new Set();scene.traverse(object=>{if(object.geometry)geometries.add(object.geometry);if(object.material)(Array.isArray(object.material)?object.material:[object.material]).forEach(m=>materials.add(m));});
     for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);for(const tex of m.userData?.extraTextures||[])textures.add(tex);m.dispose();}
-    geometries.forEach(g=>g.dispose());textures.forEach(t=>t.dispose());sun.shadow.map?.dispose();environment.dispose();target.dispose();post.dispose();rockDepthMaterial.dispose();renderer.dispose();
+    geometries.forEach(g=>g.dispose());textures.forEach(t=>t.dispose());sun.shadow.map?.dispose();environment.dispose();target.dispose();volumeTarget.dispose();blurTarget.dispose();post.dispose();rockDepthMaterial.dispose();renderer.dispose();
   });
   addEventListener('pageshow',event=>{if(event.persisted){resize(false);render();restart();}});
 }

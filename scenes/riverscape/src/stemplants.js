@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { groundHeight, randomGenerator, smoothstep, vec } from "./math.js";
+import { groundHeight, randomGenerator, screenSteps, smoothstep, vec } from "./math.js";
 import { FLOW_DIRECTION } from "./water.js";
 import { TAU, stem, stemStrand } from "./foliage.js";
 
@@ -42,7 +42,6 @@ const facing = (azimuth, rise) =>
 // leaf this small on a stem this long.
 function leaf(batch, points, halfWidth, colors, anchor, node, options) {
   const {
-    rows = 3,
     keel = 0.4,
     roll = 0,
     azimuth = 0,
@@ -52,7 +51,11 @@ function leaf(batch, points, halfWidth, colors, anchor, node, options) {
   } = options;
   const curve = new THREE.QuadraticBezierCurve3(...points);
   const length = curve.getLength();
-  const cols = needle ? 2 : 4;
+  // Most of these leaves are a few pixels long at the glass; they get the rows and
+  // columns their size on screen can show, not a fixed grid of sub-pixel slivers.
+  const middle = curve.getPoint(0.5);
+  const rows = screenSteps(middle, length, 6, 2, options.rows ?? 3);
+  const cols = needle ? 2 : 2 * screenSteps(middle, 2 * halfWidth, 8, 1, 2);
   const start = batch.positions.length / 3;
   const rest = vec(-Math.sin(azimuth), 0, Math.cos(azimuth));
   const side = new THREE.Vector3();

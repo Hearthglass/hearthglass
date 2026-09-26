@@ -18,7 +18,7 @@ if (process.argv[2] === '--sample') {
   const hash = createHash('sha256');
   const {geometry} = plants.mesh;
   for (const attribute of Object.values(geometry.attributes)) {
-    const tail = attribute.array.subarray(plants.stats.backgroundVertices * attribute.itemSize);
+    const tail = attribute.array.subarray(plants.stats.nearBackgroundVertices * attribute.itemSize);
     hash.update(Buffer.from(tail.buffer,tail.byteOffset,tail.byteLength));
     for (const value of attribute.array) assert(Number.isFinite(value));
   }

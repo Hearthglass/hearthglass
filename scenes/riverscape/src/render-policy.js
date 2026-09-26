@@ -5,10 +5,11 @@ export const PROFILES = Object.freeze({
   balanced: Object.freeze({
     name: 'balanced',
     shadowSize: 2048,
-    // Every frame: at 20-30 fps a slower shadow refresh makes moving shadows step visibly.
-    shadowHz: Infinity,
-    batteryShadowHz: Infinity,
-    aoSamples: 8,
+    // Cheap plant depth only follows the slow drag, so 15 Hz does not step the way a
+    // full-ripple shadow would at 20–30 fps. Static wood and stone stay in the map.
+    shadowHz: 15,
+    batteryShadowHz: 8,
+    aoSamples: 6,
     backgroundDensity: 0.7,
     backgroundRows: 20,
     backgroundCols: 2,
@@ -18,8 +19,8 @@ export const PROFILES = Object.freeze({
     name: 'reference',
     shadowSize: 4096,
     shadowHz: Infinity,
-    batteryShadowHz: Infinity,
-    aoSamples: 12,
+    batteryShadowHz: 15,
+    aoSamples: 8,
     backgroundDensity: 1,
     backgroundRows: 30,
     backgroundCols: 6,
@@ -41,8 +42,9 @@ export function renderSettings({
     maxPixels: budget.name === 'reference' ? Infinity : QUALITY_PRESETS[qualityName(profile)].pixels,
     referenceResolution,
     shadowHz: onBattery ? budget.batteryShadowHz : budget.shadowHz,
-    // The leaf shader uses quarter-sample coverage for translucent tissue. Keep 4x
-    // MSAA and the HDR format: changing either would be a much larger visual change.
+    // Needles and ribbon edges far thinner than a pixel need 4x MSAA to hold together
+    // (the reference profile also spends it on quarter-sample leaf translucency). Keep it
+    // and the HDR format: changing either would be a much larger visual change.
     samples: 4,
   };
 }

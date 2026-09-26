@@ -4,6 +4,7 @@ import {
   groundHeight,
   noise,
   randomGenerator,
+  screenSteps,
   smoothstep,
   vec,
 } from "./math.js";
@@ -179,8 +180,8 @@ function stalk(
     radius,
     color,
     tipColor = null,
-    rows,
-    cols = 7,
+    rows: fullRows,
+    cols: fullCols = 7,
     flat = 1.2,
     groove = 0,
     sheath = 0,
@@ -192,6 +193,11 @@ function stalk(
   },
 ) {
   const length = curve.getLength();
+  // Steps follow the stalk's size on screen; a knuckled rhizome keeps enough rows to
+  // show each node.
+  const middle = curve.getPoint(0.5);
+  const rows = screenSteps(middle, length, 6, knuckle ? Math.min(fullRows, 4 * knuckle.count) : 3, fullRows);
+  const cols = screenSteps(middle, TAU * radius * flat, 3, 4, fullCols);
   const frames = sweptFrames(curve, rows, UP);
   const start = batch.positions.length / 3;
   const tint = new THREE.Color();
@@ -284,8 +290,8 @@ function bladeSurface(batch, spec) {
     parent = null,
     compliance = 0.3,
     thin = 0.2,
-    rows = 20,
-    cols = 12,
+    rows: fullRows = 20,
+    cols: fullCols = 12,
     veinPairs = 9,
     arch = 0.06,
     droop = 0.16,
@@ -323,6 +329,11 @@ function bladeSurface(batch, spec) {
       .addScaledVector(UP, -length * droop)
       .addScaledVector(side0, length * sweep),
   );
+  // The grid follows the blade's size on screen, but never so coarse that it loses the
+  // margin's waves or the puckering between vein pairs.
+  const middle = curve.getPoint(0.5);
+  const rows = screenSteps(middle, length, 5, Math.min(fullRows, Math.max(6, undulate ? 3 * undulateWaves : 0, bullate ? 2 * veinPairs : 0)), fullRows);
+  const cols = 2 * screenSteps(middle, 2 * width, 10, 2, fullCols / 2);
   const reach = cordate ? cordate.reach : 0;
   const frames = sweptFrames(curve, rows * 3 + 6, face, reach);
   const start = batch.positions.length / 3;

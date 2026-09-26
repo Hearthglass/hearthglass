@@ -1,14 +1,15 @@
 import { qualityName, frameRate } from '../../shared/render-policy.js';
-import { installControls, reportSceneError, preferredQuality } from '../../shared/controls.js';
+import { installControls, reportSceneError, preferredQuality, pointerTools } from '../../shared/controls.js';
 import { createComposite } from './composite.js';
 import * as THREE from "three";
 import { createEnvironment, createParticles } from "./environment.js";
 import { createPlants } from "./plants.js";
 import { createFishSchool, POPULATIONS } from "./fish.js";
 import { createFood } from "./food.js";
-import { randomGenerator } from "./math.js";
+import { randomGenerator, VIEW } from "./math.js";
 import { waterTime } from "./water.js";
 import { createFrameLoop } from "../../shared/frame-loop.js";
+import { createGpuScaler } from "../../shared/gpu-scaler.js";
 import { renderSettings, framebufferSize } from "./render-policy.js";
 
 const canvas = document.querySelector("#scene");
@@ -105,15 +106,16 @@ async function start() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.17;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  const scaler = createGpuScaler(renderer, { capture: query.get("still") === "1" });
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#050f0c");
   // A faint green-blue veil builds along the viewing ray, leaving the foreground clear
   // while the back planting loses a little contrast through the water.
   scene.fog = new THREE.FogExp2("#16312a", 0.034);
-  const camera = new THREE.PerspectiveCamera(25.8, 1420 / 740, 0.2, 65);
-  camera.position.set(0, 4.65, 20.5);
-  camera.lookAt(0, 4.15, 0);
+  const camera = new THREE.PerspectiveCamera(VIEW.fov, 1420 / 740, 0.2, 65);
+  camera.position.copy(VIEW.eye);
+  camera.lookAt(VIEW.target);
 
   // Overhead lamp with a soft skylight-like fill; the back light passes through the
   // thin leaves and reads as their translucency.
@@ -188,7 +190,7 @@ async function start() {
   scene.add(backboard);
   const { obstacles, landmarks } = await createEnvironment(scene);
   const plants = createPlants(scene, {
-    ...settings, animatedShadows: profile !== "reference",
+    ...settings, animatedShadows: profile !== "reference", translucency: profile === "reference",
   });
   const food = createFood(scene, { thickets: plants.thickets });
   const fish = createFishSchool(scene, {
@@ -220,7 +222,7 @@ async function start() {
     const bounds = canvas.getBoundingClientRect();
     // DPR may change when a preview moves between monitors.
     settings = renderSettings({ profile, wallpaper, pixelRatio: devicePixelRatio, onBattery });
-    const dimensions = framebufferSize(bounds.width, bounds.height, settings.resolution, maxDimension, settings.maxPixels);
+    const dimensions = framebufferSize(bounds.width, bounds.height, settings.resolution * scaler.scale, maxDimension, settings.maxPixels);
     zeroSize = !dimensions;
     visibility();
     if (!dimensions) return;
@@ -309,8 +311,10 @@ async function start() {
       ),
       camera,
     );
-    if (raycaster.ray.intersectPlane(feedPlane, dropPoint))
-      food.drop(dropPoint, undefined, { submerged: true });
+    if (raycaster.ray.intersectPlane(feedPlane, dropPoint)) {
+      if (pointerTool.id === "feed") food.drop(dropPoint, undefined, { submerged: true });
+      else fish.addFish(event.clientX, event.clientY);
+    }
   });
   // The same pinch without a click, for the wallpaper's menu: the cursor is up in the
   // menu bar at that moment, so the food goes over the open middle of the tank instead,
@@ -319,15 +323,19 @@ async function start() {
   sprinkle = () => {
     food.drop(dropPoint.set(-3.6 + scatter() * 7.2, 0, 0));
   };
+  let pointerTool = { id: "feed" };
 
   updateControls = installControls({
     habitat, isPaused: () => paused,
     isRunning: () => Boolean(loop?.state.running),
     pause: window.habitatPause, feed: window.habitatFeed,
     quality: () => profile === 'reference' ? 'detail' : profile,
+    tools: pointerTools(),
+    setTool(tool) { pointerTool = tool; },
     setQuality(value) {
       profile = qualityName(value);
       loop?.setRate(frameRate(profile, requestedRate, onBattery));
+      scaler.reset();
       resize();
       updateControls();
     },
@@ -361,11 +369,13 @@ async function start() {
       forceShadows = false;
       shadowFrames++;
     }
+    scaler.begin();
     renderer.info.reset();
     renderer.setRenderTarget(target);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
     renderer.render(postScene, postCamera);
+    scaler.end(frameRate(profile, requestedRate, onBattery), dt) && resize();
     renderedFrames++;
     if (!ready) {
       ready = true;
@@ -378,7 +388,7 @@ async function start() {
   });
   updateControls();
   window.habitatStats = () => ({
-    profile, onBattery, resolution: settings.resolution,
+    profile, onBattery, resolution: settings.resolution * scaler.scale,
     framebuffer: [target.width, target.height], samples: target.samples,
     shadowSize: settings.shadowSize,
     shadowHz: Number.isFinite(settings.shadowHz) ? settings.shadowHz : "per-frame",

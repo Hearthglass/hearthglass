@@ -7,6 +7,17 @@ export const random = randomGenerator(34191);
 export const range = (a, b) => a + (b - a) * random();
 export const vec = (x, y, z) => new THREE.Vector3(x, y, z);
 
+// The camera never moves (main.js builds it from VIEW), so how large a leaf or stem appears
+// on screen is known when it is built. A plant part tessellated finer than a few pixels a
+// step costs a full 2x2 shading quad per sliver of triangle and adds nothing to the image;
+// screenSteps sizes each strip to the pixels it covers on a frame 1080 rows high.
+export const VIEW = Object.freeze({ eye: vec(0, 4.65, 20.5), target: vec(0, 4.15, 0), fov: 25.8 });
+const FOCAL = 540 / Math.tan((VIEW.fov * Math.PI) / 360);
+export function screenSteps(point, size, pixels, min, max) {
+  const covered = (size * FOCAL) / Math.max(1, point.distanceTo(VIEW.eye));
+  return Math.min(max, Math.max(min, Math.ceil(covered / pixels)));
+}
+
 function hash(x, y, z) {
   const h = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
   return h - Math.floor(h);
@@ -108,6 +119,7 @@ export class GeometryBatch {
     g.setAttribute("thin", new THREE.Float32BufferAttribute(this.thin, 1));
     g.setIndex(this.indices);
     g.computeVertexNormals();
+    g.computeBoundingSphere();
     return g;
   }
 }

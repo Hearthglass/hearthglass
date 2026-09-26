@@ -6,6 +6,7 @@ import {
   random,
   smoothstep,
   vec,
+  VIEW,
 } from "./math.js";
 import { FLOW_DIRECTION } from "./water.js";
 import { TAU, blade, foliageDepth, foliageMaterial } from "./foliage.js";
@@ -13,6 +14,51 @@ import { plantForeground } from "./broadleaf.js";
 import { plantStems } from "./stemplants.js";
 
 const FLOW_ANGLE = Math.atan2(FLOW_DIRECTION.z, FLOW_DIRECTION.x);
+
+// Thin tissue can let light through by alpha to coverage (the reference profile keeps it
+// for A/B checks), but with that on the GPU tests depth only after the leaf shader has run,
+// so every leaf hidden behind another is shaded in full, and the dithered samples defeat the
+// multisample compression over every ribbon. At wallpaper scale the see-through is barely
+// visible and the planting costs a quarter of the frame, so the other profiles draw it
+// opaque. Either way the plants nearest the glass draw first, so the depth test turns away
+// the leaves they hide before any shading; with translucency, ribbons and needles (the
+// material's vThin >= .7) draw after everything opaque. The camera never moves, so the
+// order is set once here.
+function orderForView(geometry, translucency) {
+  const index = geometry.index.array;
+  const thin = geometry.attributes.thin.array;
+  const anchor = geometry.attributes.anchor.array;
+  const plants = new Map();
+  for (let t = 0; t < index.length; t += 3) {
+    const v = index[t];
+    const translucent = translucency && thin[v] >= 0.7;
+    const key = `${anchor[v * 3]},${anchor[v * 3 + 1]},${anchor[v * 3 + 2]},${translucent}`;
+    let plant = plants.get(key);
+    if (!plant) {
+      const x = anchor[v * 3] - VIEW.eye.x, y = anchor[v * 3 + 1] - VIEW.eye.y, z = anchor[v * 3 + 2] - VIEW.eye.z;
+      plant = { translucent, distance: x * x + y * y + z * z, triangles: [] };
+      plants.set(key, plant);
+    }
+    plant.triangles.push(t);
+  }
+  const order = [...plants.values()].sort((a, b) => a.translucent - b.translucent || a.distance - b.distance);
+  const sorted = new index.constructor(index.length);
+  let at = 0, opaque = 0;
+  for (const plant of order) {
+    for (const t of plant.triangles) {
+      sorted[at++] = index[t];
+      sorted[at++] = index[t + 1];
+      sorted[at++] = index[t + 2];
+    }
+    if (!plant.translucent) opaque = at;
+  }
+  index.set(sorted);
+  if (translucency) {
+    geometry.addGroup(0, opaque, 0);
+    geometry.addGroup(opaque, index.length - opaque, 1);
+  }
+  return geometry;
+}
 
 // Rivergrass: a rosette of long, very thin ribbon leaves. Older outer leaves are longer,
 // paler and lean further; most leaves grow out along the current that has shaped them,
@@ -48,6 +94,7 @@ function ribbonRosette(batch, x, z, height, count, background = null) {
       rows: background ? background.rows : 30,
       cols: background ? background.cols : 6,
       emit: background ? background.keep() : true,
+      fit: !background,
       twist: theta + Math.PI / 2,
       ribbon: true,
       thin: 1,
@@ -142,8 +189,10 @@ const grassHeight = (x) => 5.4 + 4.0 * smoothstep(2.0, 7.5, Math.abs(x));
 
 export function createPlants(scene, {
   backgroundDensity = 0.7, backgroundRows = 20, backgroundCols = 2, animatedShadows = true,
+  translucency = false,
 } = {}) {
-  const batch = new GeometryBatch();
+  const near = new GeometryBatch();
+  const rear = new GeometryBatch();
   const density = Number.isFinite(backgroundDensity) ? Math.max(0, Math.min(1, backgroundDensity)) : 0.7;
   const stats = { backgroundCandidates: 0, backgroundKept: 0 };
   const background = {
@@ -158,7 +207,8 @@ export function createPlants(scene, {
       return keep;
     },
   };
-  for (const bed of BEDS) {
+  for (const [index, bed] of BEDS.entries()) {
+    const batch = index === 2 ? rear : near;
     const scale = bed.height ?? 1;
     for (let c = 0; c < bed.clumps; c++) {
       const cx = range(bed.minX, bed.maxX),
@@ -197,11 +247,12 @@ export function createPlants(scene, {
   // middle where the channel runs back into open water.
   for (let i = 0; i < 10; i++) {
     const x = range(3.4, 9.8) * (i % 2 ? 1 : -1);
-    ribbonRosette(batch, x, range(-5.9, -4.8), grassHeight(x) * range(0.6, 0.85), 10, background);
+    ribbonRosette(rear, x, range(-5.9, -4.8), grassHeight(x) * range(0.6, 0.85), 10, background);
   }
-  stats.backgroundVertices = batch.positions.length / 3;
-  stats.backgroundTriangles = batch.indices.length / 3;
-  plantForeground(batch);
+  stats.backgroundVertices = near.positions.length / 3 + rear.positions.length / 3;
+  stats.backgroundTriangles = near.indices.length / 3 + rear.indices.length / 3;
+  stats.nearBackgroundVertices = near.positions.length / 3;
+  plantForeground(near);
   // Tufts along the banks break up the stone-to-sand boundaries, and two at the far right
   // carry the bed down to the glass so no bare sand shows behind the Echinodorus.
   for (const [x, z, h, n] of [
@@ -214,7 +265,7 @@ export function createPlants(scene, {
     [9.3, -2.6, 2.4, 12],
     [9.8, -1.9, 1.8, 10],
   ])
-    ribbonRosette(batch, x, z, h, n);
+    ribbonRosette(near, x, z, h, n);
   // Fern tufts: three on the moss clump at the fork of the trunk, the rest in the crevices
   // where stone meets sand.
   for (const [x, y, z, s, n, onWood] of [
@@ -227,7 +278,7 @@ export function createPlants(scene, {
     [-5.25, 0.3, 1.15, 0.65, 24],
     [3.2, 0.3, 0.75, 0.7, 22],
   ])
-    fernTuft(batch, vec(x, y, z), s, n, onWood);
+    fernTuft(near, vec(x, y, z), s, n, onWood);
   // A mature tank sheds: a few dead leaves lie in the channel, on the open sand at the
   // glass and at the foot of the stones.
   for (const [x, z, length, heading] of [
@@ -237,8 +288,8 @@ export function createPlants(scene, {
     [0.7, -1.6, 0.75, -0.5],
     [7.2, 2.1, 0.85, 2.0],
   ])
-    fallenLeaf(batch, x, z, length, heading);
-  plantStems(batch);
+    fallenLeaf(near, x, z, length, heading);
+  plantStems(near);
   // Young runners taper the left bed into the fine stems, with gaps between shoots.
   for (const [x, z, height, leaves] of [
     [-10.15, -3.15, 3.2, 3],
@@ -246,14 +297,30 @@ export function createPlants(scene, {
     [-9.05, -2.85, 5.3, 4],
     [-8.55, -3.3, 6.1, 5],
   ])
-    ribbonRosette(batch, x, z, height, leaves);
-  const mesh = new THREE.Mesh(batch.geometry(), foliageMaterial());
-  mesh.name = 'Aquatic planting';
-  mesh.customDepthMaterial = foliageDepth({ animated: animatedShadows });
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  scene.add(mesh);
-  stats.vertices = mesh.geometry.attributes.position.count;
-  stats.triangles = mesh.geometry.index.count / 3;
-  return { mesh, thickets: THICKETS, stats };
+    ribbonRosette(near, x, z, height, leaves);
+  function plantMesh(batch, { cheap, castShadow, name }) {
+    const mesh = cheap
+      ? new THREE.Mesh(batch.geometry(), foliageMaterial({ cheap }))
+      : new THREE.Mesh(
+          orderForView(batch.geometry(), translucency),
+          translucency ? [foliageMaterial({ coverage: false }), foliageMaterial()] : foliageMaterial({ coverage: false }),
+        );
+    mesh.name = name;
+    mesh.frustumCulled = true;
+    if (castShadow) {
+      mesh.customDepthMaterial = foliageDepth({ animated: animatedShadows, cheap: true });
+      mesh.castShadow = true;
+    }
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    return mesh;
+  }
+  const nearMesh = plantMesh(near, { cheap: false, castShadow: true, name: "Aquatic planting" });
+  const rearMesh = plantMesh(rear, { cheap: true, castShadow: false, name: "Rear planting" });
+  const meshes = [nearMesh, rearMesh];
+  stats.vertices = meshes.reduce((n, m) => n + m.geometry.attributes.position.count, 0);
+  stats.triangles = meshes.reduce((n, m) => n + m.geometry.index.count / 3, 0);
+  stats.nearTriangles = nearMesh.geometry.index.count / 3;
+  stats.rearTriangles = rearMesh.geometry.index.count / 3;
+  return { mesh: nearMesh, meshes, thickets: THICKETS, stats };
 }

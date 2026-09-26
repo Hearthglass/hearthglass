@@ -9,10 +9,11 @@ const battery = renderSettings({ wallpaper: true, pixelRatio: 2, onBattery: true
 assert.equal(reference.resolution, 2);
 assert.equal(balanced.resolution, 1.25);
 assert.equal(battery.resolution, 1.125);
-assert.equal(balanced.samples, 4, 'Preserve quarter-coverage foliage translucency');
+assert.equal(balanced.samples, 4, 'Preserve multisampled needle and ribbon edges');
+assert.equal(balanced.aoSamples, 6);
 assert.equal(balanced.shadowSize, 2048);
-assert.equal(balanced.shadowHz, Infinity);
-assert.equal(battery.shadowHz, Infinity);
+assert.equal(balanced.shadowHz, 15);
+assert.equal(battery.shadowHz, 8);
 assert.equal(renderSettings({ profile: 'typo' }).name, 'balanced');
 assert.equal(renderSettings({ profile: 'reference', pixelRatio: 3 }).resolution, 1.5);
 assert.equal(renderSettings({ profile: 'reference', wallpaper: true, pixelRatio: NaN }).resolution, 1.5);

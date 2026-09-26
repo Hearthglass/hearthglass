@@ -115,7 +115,7 @@ export function createAnemone(scene){
     vec3 tentacleCenter(float s){vec2 h=tSway*s*s+tTip*s*s*s*s;return arcPoint(s)+vec3(h.x,0.,h.y);}
     vec3 tentacleSlope(float s){vec2 dh=tSway*2.*s+tTip*4.*s*s*s;float t=aCurve.x+aCurve.y*s;float z=.05*(sin(s*5.5+aCurve.w*25.)+5.5*s*cos(s*5.5+aCurve.w*25.));return vec3(sin(t),cos(t),z)*aShape.x+vec3(dh.x,0.,dh.y);}`;
   const mat=underwater(new THREE.MeshStandardMaterial({color:'#ffffff',roughness:.52,metalness:0}),{
-    key:'tank-anemone',vertex,
+    key:'tank-anemone',caustics:'off',vertex,
     // Tissue a few cells thick: the base passes a little light, the tip most of it.
     transmission:'(.20+.40*smoothstep(.20,1.,vAxis))',
     normal:`tentacleSolve();vec3 slope=normalize(tentacleSlope(position.y));vec3 tx=normalize(vec3(slope.y,-slope.x,0.));vec3 tz=normalize(cross(tx,slope));objectNormal=normalize((tx*normal.x+tz*normal.z)/aShape.y+slope*normal.y/length(tentacleSlope(position.y)));`,
@@ -171,7 +171,7 @@ export function createAnemone(scene){
   }
   setQuality('detail');
   tentacles.frustumCulled=false;tentacles.receiveShadow=true;scene.add(tentacles);
-  const body=new THREE.Mesh(merge(specimens.map(bodyGeometry)),underwater(new THREE.MeshStandardMaterial({vertexColors:true,roughness:.44}),{key:'anemone-body',transmission:.10}));
+  const body=new THREE.Mesh(merge(specimens.map(bodyGeometry)),underwater(new THREE.MeshStandardMaterial({vertexColors:true,roughness:.44}),{key:'anemone-body',transmission:.10,caustics:'off'}));
   body.castShadow=body.receiveShadow=true;scene.add(body);
   return {tentacles,count:TENTACLE_COUNT,setQuality};
 }

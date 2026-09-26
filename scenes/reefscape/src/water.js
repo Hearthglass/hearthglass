@@ -73,18 +73,12 @@ const lens=(waves,arm)=>`
   ${waves.map(w=>`{float curvature=-${n(w.a*w.k*w.k)}*sin(${n(w.k)}*dot(q,vec2(${n(w.dx)},${n(w.dz)}))-${n(w.omega)}*t+${n(w.phase)});hxx+=curvature*${n(w.dx*w.dx)};hzz+=curvature*${n(w.dz*w.dz)};hxz+=curvature*${n(w.dx*w.dz)};}`).join('\n')}
   float determinant=(1.-${arm}*hxx)*(1.-${arm}*hzz)-${arm}*${arm}*hxz*hxz;`;
 const surfaceCrossing=`float depth=clamp(${n(h)}-p.y,.02,9.);vec2 q=p.xz+depth*vec2(${n(LAMP.x/LAMP.y)},${n(LAMP.z/LAMP.y)});`;
-export const causticGLSL=`
+export const causticGLSL=(waves=WAVES,gain=4.4)=>`
 vec3 reefIrradiance(vec3 p,float t){
   ${surfaceCrossing}
   t*=${n(RIPPLE_TIME)};
-  // Surface ripples are small, but a point-like LED focuses them into glitter lines on the bed;
-  // the factor stands in for that concentration.
-  ${lens(WAVES,'(depth*1.2488)')}
-  // Glitter lines: the fold where the ray map loses rank is a thin bright band, the rest a
-  // mild dimming, as point-like LEDs draw on a tank bed.
-  float focus=.84+4.40*pow(clamp(1.-abs(determinant)*1.35,0.,1.),3.4);
-  // The bank sits over the front half of the tank, so the rear hardscape is lit at a slant
-  // and through more water: it falls off toward the back wall instead of meeting it lit.
+  ${waves.length?lens(waves,'(depth*1.2488)'):'float determinant=1.;'}
+  float focus=.84+${n(gain)}*pow(clamp(1.-abs(determinant)*1.35,0.,1.),3.4);
   float reach=.46+.54*smoothstep(-4.6,-.6,p.z);
   return exp(-vec3(.13,.046,.026)*depth*.16)*focus*reach;
 }`;
@@ -110,6 +104,8 @@ const IOR=1.333,lamp=[LAMP.x*LAMP_RANGE,h+(LAMP.y*LAMP_RANGE-h)*IOR,LAMP.z*LAMP_
 export const inscatterGLSL=`
 float reefShafts(vec3 p,float t){
   vec2 q=vec2(${n(lamp[0])},${n(lamp[2])});q+=(p.xz-q)*${n(lamp[1]-h)}/max(${n(lamp[1])}-p.y,1.);
+  float st=t*${n(RIPPLE_TIME)};
+  ${WAVES.slice(0,2).map(w=>`q+=${n(w.a*14)}*vec2(${n(w.dx)},${n(w.dz)})*cos(${n(w.k)}*dot(q,vec2(${n(w.dx)},${n(w.dz)}))-${n(w.omega)}*st+${n(w.phase)});`).join('\n')}
   float a=pow(.5+.5*sin(q.x*1.3+.8*sin(q.y*.5+t*.05)+t*.031),10.)
     +.8*pow(.5+.5*sin(q.x*2.3-q.y*.4-t*.047+1.3),12.)
     +.6*pow(.5+.5*sin(q.x*3.7+q.y*.3+t*.023+.4),14.)
@@ -154,7 +150,10 @@ const thickness=t=>typeof t==='number'?n(t):`(${t})`;
 /** PBR lighting with short in-water paths. Camera air path is deliberately excluded.
  *  Geometry is kept in the bounded tank; neither fog nor sun rays hide bad modelling.
  */
-export function underwater(material,{vertex='',begin='',normal='',fragment='',color='',map='',surfaceNormal='',key='reef',transmission=0}={}){
+export function underwater(material,{vertex='',begin='',normal='',fragment='',color='',map='',surfaceNormal='',key='reef',transmission=0,caustics='full'}={}){
+  const waves=caustics==='off'?[]:caustics==='lite'?WAVES.slice(0,3):WAVES;
+  const gain=caustics==='lite'?1.6:4.4;
+  const irradiance=waves.length?causticGLSL(waves,gain):`vec3 reefIrradiance(vec3 p,float t){return vec3(.92,.94,.90);}`;
   material.onBeforeCompile=shader=>{
     shader.uniforms.reefTime=waterTime;
     shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>\nuniform float reefTime;varying vec3 vReefWorld;${vertex}`)
@@ -165,7 +164,7 @@ export function underwater(material,{vertex='',begin='',normal='',fragment='',co
       reefPosition=instanceMatrix*reefPosition;
       #endif
       vReefWorld=(modelMatrix*reefPosition).xyz;`);
-    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>\nuniform float reefTime;varying vec3 vReefWorld;vec3 reefLight=vec3(1.);${causticGLSL}${extinctionGLSL}${fragment}`)
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>\nuniform float reefTime;varying vec3 vReefWorld;vec3 reefLight=vec3(1.);${irradiance}${extinctionGLSL}${fragment}`)
       .replace('#include <map_fragment>',map||'#include <map_fragment>')
       .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\n'+surfaceNormal)
       .replace('#include <color_fragment>',`#include <color_fragment>\n${color}`)
@@ -181,5 +180,5 @@ export function underwater(material,{vertex='',begin='',normal='',fragment='',co
       .replace('#include <opaque_fragment>',`outgoingLight*=reefTransmittance(reefWaterPath(vReefWorld,cameraPosition));
         #include <opaque_fragment>`);
   };
-  material.customProgramCacheKey=()=>key;return material;
+  material.customProgramCacheKey=()=>`${key}:${caustics}`;return material;
 }

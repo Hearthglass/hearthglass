@@ -88,7 +88,7 @@ export function createShrimp(scene, simulation) {
     for(let i=0;i<6;i++){
       const x=-.12-i*.060,y=.13-Math.pow(i/5,2)*.10;
       const g=sphere([x,y,0],[.070-i*.003,.061-i*.004,.069-i*.005],'#c9543f');
-      tint(g,p=>new THREE.Color(Math.abs(p.z)<.018&&p.y>y+.040?'#f3efe3':p.y>y+.004?'#b82019':p.x<x-.043?'#bba07c':'#dcc39a'));bodyParts.push(g);
+      tint(g,p=>new THREE.Color(Math.abs(p.z)<.018&&p.y>y+.040?'#f3efe3':p.y>y+.004?'#b82019':Math.abs(p.x-(x+(.070-i*.003)*.72))<.011?'#2c120e':p.x<x-.043?'#bba07c':'#dcc39a'));bodyParts.push(g);
     }
     // Telson + paired uropods; overlap the sixth segment without a gap. The fan is red
     // with white tips on the uropods.
@@ -97,7 +97,7 @@ export function createShrimp(scene, simulation) {
     for(const sign of [-1,1]){
       bodyParts.push(tube([V(.22,.19,sign*.045),V(.26,.25,sign*.087)],[.016,.014],6));
       bodyParts.push(sphere([.26,.26,sign*.087],[.027,.030,.027],'#102629'));
-      bodyParts.push(sphere([.271,.270,sign*.097],[.008,.009,.007],'#d0dacc'));
+      bodyParts.push(sphere([.273,.273,sign*.100],[.011,.012,.010],'#f4f7f3'));
       // A caridean walks on three pairs: P1 is short and stoutly chelate and P2 is the
       // genus' thread-fine chela on a many-jointed carpus, and it picks with both rather
       // than walking on them. Five walking pairs was the wrong read. Both are drawn in five
@@ -130,7 +130,7 @@ export function createShrimp(scene, simulation) {
         for(let k=0;k<=24;k++){
           const s=k/24;
           pts.push(antennaPoint(j,s,sign,V(0,0,0)));
-          radii.push(.010*(1-s*.86));
+          radii.push(.012*(1-s*.92)*(s<.12?1.15:1));
         }
         antennae.push(tint(limb(pts,radii,j),()=>new THREE.Color('#f4f0e6')));
       }
@@ -139,14 +139,14 @@ export function createShrimp(scene, simulation) {
     // are whole multiples of 0.5 Hz and no phase drifts however long the scene has run.
     const gait={value:new THREE.Vector4(0,0,0,0)},pose={value:new THREE.Vector4(0,0,0,0)},feet={value:FEET.map(()=>0)},lift={value:new THREE.Vector4(0,0,0,0)};
     const drive=material=>{const inner=material.onBeforeCompile;material.onBeforeCompile=s=>{inner(s);s.uniforms.shrimpGait=gait;s.uniforms.shrimpPose=pose;s.uniforms.shrimpFeet=feet;s.uniforms.shrimpLift=lift;};return material;};
-    const bodyMat=drive(underwater(new THREE.MeshStandardMaterial({vertexColors:true,roughness:.46}),{
-      key:'shrimp-shell',transmission:.045,vertex:'uniform vec4 shrimpPose;',begin:FLEX}));
+    const bodyMat=drive(underwater(new THREE.MeshPhysicalMaterial({vertexColors:true,roughness:.32,clearcoat:1,clearcoatRoughness:.14,metalness:0}),{
+      key:'shrimp-shell',transmission:'(.10+.22*pow(1.-abs(dot(geometryNormal,geometryViewDir)),1.4))',caustics:'off',vertex:'uniform vec4 shrimpPose;',begin:FLEX}));
     const body=merge(bodyParts);root.add(new THREE.Mesh(body,bodyMat));
     // The belly line, read off the mesh itself: the lowest vertex in each tenth of the body's
     // length, tail fan to rostrum, is what has to clear the rock.
     if(!underside.length){const p=body.attributes.position,low=new Map();for(let k=0;k<p.count;k++){const b=Math.round(p.getX(k)*10);if(!low.has(b)||p.getY(k)<low.get(b).y)low.set(b,V(p.getX(k),p.getY(k),p.getZ(k)));}underside.push(...low.values());}
     const legMat=drive(underwater(new THREE.MeshStandardMaterial({vertexColors:true,roughness:.66}),{
-      key:'shrimp-legs',vertex:'uniform vec4 shrimpGait;uniform vec4 shrimpPose;uniform float shrimpFeet[6];',
+      key:'shrimp-legs',caustics:'off',vertex:'uniform vec4 shrimpGait;uniform vec4 shrimpPose;uniform float shrimpFeet[6];',
       begin:`float code=uv.x,along=uv.y,side=sign(position.z),tip=along*(.30+.70*along);
         if(code<4.5){
           // The wave runs from the back pair forward, a quarter cycle between neighbours at
@@ -194,8 +194,8 @@ export function createShrimp(scene, simulation) {
         }
         ${FLEX}`}));
     root.add(new THREE.Mesh(merge(legs),legMat));
-    const antennaMat=drive(underwater(new THREE.MeshStandardMaterial({vertexColors:true,roughness:.62}),{
-      key:'shrimp-antennae',vertex:`uniform vec4 shrimpGait;uniform vec4 shrimpPose;uniform vec4 shrimpLift;${responseGLSL}`,
+    const antennaMat=drive(underwater(new THREE.MeshPhysicalMaterial({vertexColors:true,roughness:.28,clearcoat:.8,clearcoatRoughness:.2,metalness:0}),{
+      key:'shrimp-antennae',transmission:.12,caustics:'off',vertex:`uniform vec4 shrimpGait;uniform vec4 shrimpPose;uniform vec4 shrimpLift;${responseGLSL}`,
       begin:`float along=uv.y,side=sign(position.z),tip=along*along,antenna=step(uv.x,.5);
         // Turned about the base to clear the rock (antennaTurn): rolled, then raised.
         vec2 turn=side>0.?shrimpLift.yw:shrimpLift.xz;
