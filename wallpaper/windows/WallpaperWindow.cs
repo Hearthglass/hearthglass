@@ -38,9 +38,7 @@ public class WallpaperWindow : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         Bounds = screen.Bounds;
-        BackColor = habitat == "reefscape"
-            ? Color.FromArgb(11, 24, 37)
-            : Color.FromArgb(8, 14, 12);
+        BackColor = Habitats.Find(habitat).Background;
 
         _webView = new WebView2
         {
@@ -177,9 +175,7 @@ public class WallpaperWindow : Form
     {
         if (_habitat == habitat) return;
         _habitat = habitat;
-        BackColor = habitat == "reefscape"
-            ? Color.FromArgb(11, 24, 37)
-            : Color.FromArgb(8, 14, 12);
+        BackColor = Habitats.Find(habitat).Background;
         _webView.DefaultBackgroundColor = BackColor;
         LoadScene();
     }

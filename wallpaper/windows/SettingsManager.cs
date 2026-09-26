@@ -36,6 +36,8 @@ public static class SettingsManager
                 var settings = JsonSerializer.Deserialize<AppSettings>(json);
                 if (settings != null)
                 {
+                    // A scene that is no longer shipped falls back to the first one.
+                    settings.Habitat = Habitats.Find(settings.Habitat).Id;
                     return settings;
                 }
             }

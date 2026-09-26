@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en" data-motion="host">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#061629" />
+    <meta name="description" content="The pixel-art reef tank, framed to fill a screen as a desktop wallpaper." />
+    <title>Pixel Reef • Desktop Habitats wallpaper</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main id="habitat" aria-label="Interactive pixel-art reef aquarium">
+      <canvas id="scene" tabindex="-1"></canvas>
+      <div id="loading" role="status"><p>Filling the tank…</p></div>
+      <div id="error" role="alert" hidden></div>
+    </main>
+    <script type="module" src="../shared/start.js" data-entry="./src/main.js"></script>
+  </body>
+</html>

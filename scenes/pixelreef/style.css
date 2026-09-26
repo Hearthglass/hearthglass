@@ -1,0 +1,5 @@
+@import url("../../ui/scene.css");
+:root { --background: #061629; }
+/* Holding and dragging are part of play here, so touch must not pan or zoom the page. */
+#scene { image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
+#loading { background: #061629; }

@@ -25,16 +25,19 @@ let pointer;
 let suppressClick = false;
 let clickDuringMotion = false;
 
+// The cards sit evenly around one orbit: opposite each other for two, a quarter turn apart for four.
+const ORBIT_STEP = (2 * Math.PI) / portals.length;
+const CAPTION_DEPTH = portals.length > 2 ? 0.3 : 0.65;
 function render() {
   for (const [index, portal] of portals.entries()) {
-    const angle = (index - position) * Math.PI;
+    const angle = (index - position) * ORBIT_STEP;
     const depth = (1 - Math.cos(angle)) / 2;
-    // Opposite arcs keep the two opaque images apart as they exchange depth.
+    // Opposite arcs keep the opaque images apart as they exchange depth.
     const x = 48 * depth + 50 * Math.sin(angle);
     portal.style.transform = `translate3d(${x}%, ${-4 * depth}%, ${-520 * depth}px) rotateY(${-18 * depth}deg)`;
     portal.style.zIndex = Math.round(1000 * (1 - depth));
     portal.style.setProperty('--brightness', 1 - 0.55 * depth);
-    portal.querySelector('.portal-caption').style.visibility = depth < 0.65 ? 'visible' : 'hidden';
+    portal.querySelector('.portal-caption').style.visibility = depth < CAPTION_DEPTH ? 'visible' : 'hidden';
   }
 }
 function announce() {
@@ -132,7 +135,10 @@ function snap(target) {
 }
 function select(index) {
   const front = nearest(position);
-  snap(wrap(front) === index ? front : front + 1);
+  // the shorter way round the orbit
+  let delta = wrap(index - wrap(front));
+  if (delta > portals.length / 2) delta -= portals.length;
+  snap(front + delta);
 }
 
 document.addEventListener('keydown', event => {

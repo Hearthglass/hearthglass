@@ -3,16 +3,16 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../gallery.js', import.meta.url), 'utf8');
-function setup(reduceMotion = false) {
+function setup(reduceMotion = false, names = ['River', 'Reef']) {
   const frames = new Map();
   const timers = new Map();
   let nextId = 0;
   let now = 0;
   const handlers = {};
   const classes = new Set();
-  const portals = ['River', 'Reef'].map(name => ({
+  const portals = names.map(name => ({
     offsetWidth: 1000,
-    style: { setProperty() {} },
+    style: { setProperty() {}, zIndex: 0, transform: '' },
     classList: { toggle() {} },
     querySelector: selector => selector === 'h2' ? { firstChild: { textContent: name } } : { style: {} },
     contains: () => false, setAttribute() {}, removeAttribute() {},
@@ -203,4 +203,20 @@ const wheelEvent = (deltaX, deltaY) => ({ deltaX, deltaY, deltaMode: 0, preventD
   app.tick();
   assert.equal(app.read('position'), 1, 'releasing at the destination does not push beyond it');
 }
-console.log('PASS: gallery axis lock, intent, velocity continuity, gentle completion, interruption, reduced motion and cancellation');
+{
+  // Four habitats: an even orbit, and selection takes the shorter way round.
+  const app = setup(false, ['River', 'Reef', 'Moon', 'Pixel']);
+  app.read('render()');
+  const z = app.portals.map(portal => Number(portal.style.zIndex));
+  assert.equal(z[0], 1000, 'the selected card is in front');
+  assert.equal(z[2], 0, 'the opposite card is furthest back');
+  assert.equal(z[1], z[3], 'neighbours sit at matching depth on either side');
+  app.read('select(3)');
+  assert.equal(app.read('destination'), -1, 'the card to the left is one step back, not three forward');
+  for (let i = 0; i < 100; i++) app.tick();
+  app.read('select(1)');
+  assert.equal(Math.abs(app.read('destination') - -1), 2, 'the opposite card is two steps away either way');
+  app.read('select(0)');
+  assert.equal(app.read('destination'), 0, 'wrapping around finds the card by its index');
+}
+console.log('PASS: gallery axis lock, intent, velocity continuity, gentle completion, interruption, reduced motion, cancellation and a four-card orbit');

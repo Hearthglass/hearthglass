@@ -135,6 +135,9 @@ internal sealed class PlayOverlayForm : Form
     private bool _isMouseDown = false;
     private bool _hasDragged = false;
     private Point _dragStart = Point.Empty;
+    // A press held still becomes a drag where it is, so a scene can take a long press
+    // (the wizard charging a spell, hand-feeding the reef) without the pointer moving.
+    private readonly System.Windows.Forms.Timer _holdTimer = new() { Interval = 240 };
 
     public PlayOverlayForm(PlayOverlayManager manager, WallpaperWindow window)
     {
@@ -147,10 +150,19 @@ internal sealed class PlayOverlayForm : Form
         Bounds = window.TargetScreen.Bounds;
         BackColor = Color.Black;
 
-        _hintBanner = new PlayHintBannerForm(window.TargetScreen, () => manager.AddFishMode);
+        _hintBanner = new PlayHintBannerForm(window.TargetScreen, () => manager.AddFishMode, () => window.CurrentHabitat);
         _selectionBox = new PlaySelectionBoxForm();
         // The marquee is only drawn once the tank has said the drag is a selection.
         _manager.Drag.ModeResolved += OnDragModeResolved;
+        _holdTimer.Tick += OnHoldTimer;
+    }
+
+    private void OnHoldTimer(object? sender, EventArgs e)
+    {
+        _holdTimer.Stop();
+        if (!_isMouseDown || _hasDragged) return;
+        _hasDragged = true;
+        _manager.Drag.Begin(_dragStart, Cursor.Position);
     }
 
     private void OnDragModeResolved(string mode)
@@ -209,6 +221,8 @@ internal sealed class PlayOverlayForm : Form
             _isMouseDown = true;
             _hasDragged = false;
             _dragStart = Cursor.Position;
+            _holdTimer.Stop();
+            _holdTimer.Start();
         }
     }
 
@@ -227,6 +241,7 @@ internal sealed class PlayOverlayForm : Form
             int dy = Math.Abs(currentPoint.Y - _dragStart.Y);
             if (!_hasDragged && (dx > 4 || dy > 4))
             {
+                _holdTimer.Stop();
                 _hasDragged = true;
                 _manager.Drag.Begin(_dragStart, currentPoint);
             }
@@ -245,6 +260,7 @@ internal sealed class PlayOverlayForm : Form
 
         if (e.Button == MouseButtons.Left && _isMouseDown)
         {
+            _holdTimer.Stop();
             _isMouseDown = false;
             var currentPoint = Cursor.Position;
             var targetWin = _manager.FindWindowForPoint(currentPoint) ?? _window;
@@ -281,6 +297,8 @@ internal sealed class PlayOverlayForm : Form
     {
         if (disposing)
         {
+            _holdTimer.Stop();
+            _holdTimer.Dispose();
             _manager.Drag.ModeResolved -= OnDragModeResolved;
             _hintBanner.Close();
             _hintBanner.Dispose();
@@ -294,13 +312,20 @@ internal sealed class PlayOverlayForm : Form
 internal sealed class PlayHintBannerForm : Form
 {
     private readonly Func<bool> _addFishMode;
-    private string HintText => _addFishMode()
-        ? "Play mode — click to add a fish, drag to select, drag a selected fish to move them all, right-click to feed, Esc to exit"
-        : "Play mode — drag to select fish, then drag one of them to move them all, right-click to feed, Esc to exit";
+    private readonly Func<string> _habitat;
+    private string HintText => _habitat() switch
+    {
+        "moonspire" => "Play mode — press and hold to charge a spell (hold on the moon for a big one), right-click to cast, Esc to exit",
+        "pixelreef" => "Play mode — right-click to feed or poke, drag to stir the water, press and hold to hand-feed, Esc to exit",
+        _ => _addFishMode()
+            ? "Play mode — click to add a fish, drag to select, drag a selected fish to move them all, right-click to feed, Esc to exit"
+            : "Play mode — drag to select fish, then drag one of them to move them all, right-click to feed, Esc to exit",
+    };
 
-    public PlayHintBannerForm(Screen screen, Func<bool> addFishMode)
+    public PlayHintBannerForm(Screen screen, Func<bool> addFishMode, Func<string> habitat)
     {
         _addFishMode = addFishMode;
+        _habitat = habitat;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;

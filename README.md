@@ -4,11 +4,32 @@
 
 Have you always wanted an aquarium? Now you can have it, right on your desktop :)
 
-The fish react to your cursor and compete for food, while the plants sway in a slow current. There are two environments: **Riverscape**, a planted freshwater aquarium, and **Reefscape**, a saltwater tank.
+The fish react to your cursor and compete for food, while the plants sway in a slow current. There are four environments: two 3D aquariums, **Riverscape**, a planted freshwater tank, and **Reefscape**, a saltwater tank; and two pixel-art scenes, **Moonspire**, a wizard on a moonlit rampart, and **Pixel Reef**, a hand-pixelled reef tank.
 
 ![Reefscape, a saltwater tank with clownfish around an anemone](docs/images/reefscape-wide.png)
 
-The scene is rendered live with Three.js and WebGL2. Everything runs locally, with no account or internet connection needed after setup. Desktop wallpaper support is **macOS only** for now; both environments also run in a browser. The Mac app starts with Riverscape and remembers the environment you pick from its menu.
+The aquariums are rendered live with Three.js and WebGL2. Everything runs locally, with no account or internet connection needed after setup. Desktop wallpaper support is available for **macOS and Windows**; every environment also runs in a browser. The app starts with Riverscape and remembers the environment you pick from its menu.
+
+## The pixel scenes
+
+![Moonspire, a pixel-art wizard charging his staff on a castle rampart under the moon](docs/images/moonspire-wide.png)
+
+**Moonspire** is a wizard on the battlements of his tower, a brazier crackling beside him and an owl on the wall. Everything in it is interactive:
+
+- **Hold on the moon** and he raises his staff to charge a spell: sparks spiral into the gem, runes turn at his feet and the staff crackles once it is full. Let go and the bolt flies. A short hold cracks the moon; a full charge, or enough small ones, blows it apart. He looks as surprised as you are, loses his hat, then mends the moon piece by piece.
+- **Don't hold it too long.** Kept at full power for a few seconds, the spell goes off in his face.
+- **Tap or hold on the sky** for fireworks, bigger the longer you charge.
+- **Tap the owl**, the **brazier** or the **wizard** himself. Left alone, he amuses himself now and then.
+
+![Pixel Reef, a pixel-art reef tank with tangs, clownfish, jellyfish and an octopus](docs/images/pixelreef-wide.png)
+
+**Pixel Reef** is a reef tank with clownfish in their anemone, tangs, a moorish idol, flame angels, a school of chromis, a pufferfish, jellyfish, a seahorse, a crab and an octopus in its cave.
+
+- **Tap the water** to drop food; **hold** to hand-feed a trickle; **drag** to stir the water and push the fish around.
+- **Tap the pufferfish** to make it puff up, or hold to keep it puffed. Tap the **treasure chest**, the **castle**, the **octopus's cave** (twice, if you dare), the **crab**, a **jellyfish** or the **anemone**.
+- **L** (or the lamp button) switches the tank light off: the jellyfish and some corals glow in the dark. On the desktop the light follows the clock, going off in the evening.
+
+Both are drawn at about 180 pixels tall and scaled up by a whole number, so pixels stay square and crisp on any screen; the scene widens to fit the screen's shape instead of letterboxing. Every colour on screen comes from a fixed palette: light, shadow, glow and fog are lookup tables from one palette colour to another, blended with an ordered dither. In testing, a frame took about 2 ms of CPU to draw, and up to about 9 ms while the moon explodes.
 
 ## Install on Mac
 
@@ -59,8 +80,8 @@ The script builds Desktop Habitats, installs it to `%LOCALAPPDATA%\Programs\Desk
 
 Click the fish icon in the menu bar (macOS) or system tray (Windows):
 
-- **Environment** switches every screen between Riverscape and Reefscape and remembers your choice.
-- **Feed** drops ten pellets into each screen's tank, or eight in Reefscape. Uneaten pellets dissolve after 20–40 seconds of running simulation time in Riverscape and 36 seconds in Reefscape, measured from when they touch the water.
+- **Environment** switches every screen between Riverscape, Reefscape, Moonspire and Pixel Reef, and remembers your choice.
+- **Feed** drops ten pellets into each screen's tank, or eight in Reefscape. Uneaten pellets dissolve after 20–40 seconds of running simulation time in Riverscape and 36 seconds in Reefscape, measured from when they touch the water. In Moonspire it casts a full-power spell at the moon instead.
 - **Pause / Resume** controls the animation. Your choice is remembered across restarts.
 - **Quit** closes the app until you open it again or next sign in.
 
@@ -73,13 +94,15 @@ On Windows the tray menu also has:
 - **Select fish by dragging**: fish inside the blue box Windows draws when you drag on the desktop light up and turn to look.
 - **Play mode** (or **Ctrl+Alt+F**): the desktop stops responding to the mouse so you can play with the fish. Drag to select fish, drag again to herd them, right-click to feed, and press Esc or Ctrl+Alt+F to leave. Play mode also ends by itself after a minute without input.
 
+In the pixel scenes the same controls do what makes sense there: **Add a fish** adds a firefly to Moonspire, a click is a tap (a quick spell, a pinch of food, a poke), and a drag is a held press (charging a spell, stirring the water). In play mode, press and hold still for a moment to charge a spell or hand-feed; right-click taps.
+
 Move your cursor near the fish to see them react. Desktop icons, clicks and dragging work as usual outside play mode.
 
 ## FAQ
 
 ### Does it work on Windows or Linux?
 
-Desktop wallpaper support is available for **macOS and Windows**. Linux users can still enjoy both environments directly in a browser.
+Desktop wallpaper support is available for **macOS and Windows**. Linux users can still enjoy every environment directly in a browser.
 
 ### Will it drain my battery?
 
@@ -87,7 +110,7 @@ It uses more power than a still wallpaper because it renders a 3D scene. The amo
 
 Both scenes use the same quality profiles and stop rendering when paused or hidden. The wallpaper also responds to window coverage, battery power, Low Power Mode and screen sleep.
 
-With the default Balanced profile, both environments use these limits:
+With the default Balanced profile, the two aquariums use these limits:
 
 | Desktop state | Frame rate |
 | --- | --- |
@@ -153,9 +176,9 @@ Open [the local preview](http://127.0.0.1:8080). There is no `npm install` step;
 - Click the water to drop food.
 - Move the pointer near the fish to interact.
 - Swipe or scroll through the gallery, or use the left and right arrow keys. Open the image or name to enter a scene.
-- Use **Pause / Resume**, **Feed**, **Fullscreen** and **Hide controls** in either scene. **Show controls** brings the controls back.
+- Use **Pause / Resume**, **Feed**, **Fullscreen** and **Hide controls** in any scene. **Show controls** brings the controls back. In the pixel scenes, **E** casts a spell (Moonspire) or feeds (Pixel Reef), and **L** switches Pixel Reef's tank light.
 - Press **Space** to pause or resume, **F** for fullscreen, and **H** to hide or show controls while the aquarium has focus.
-- **Quality** offers Eco (20 fps), Balanced (30 fps, the default) and Detail (60 fps). The selection is shared between the two scenes and remembered. These are frame-rate caps; lower profiles also reduce rendering resolution.
+- **Quality** offers Eco (20 fps), Balanced (30 fps, the default) and Detail (60 fps). The selection is shared between the scenes and remembered. These are frame-rate caps; lower profiles also reduce rendering resolution. The pixel scenes are light enough to run at 60 fps on Balanced and Detail, and 30 on Eco or on battery.
 
 Reduce Motion starts the preview paused. Serve the page over HTTP; opening `index.html` directly will not load its JavaScript modules. Any static server also works, such as `python3 -m http.server 8080 --bind 127.0.0.1` if you have Python installed.
 
@@ -164,4 +187,4 @@ Reduce Motion starts the preview paused. Serve the page over HTTP; opening `inde
 
 Desktop Habitats is [MIT licensed](LICENSE). Three.js 0.180.0 is bundled under its [MIT license](vendor/THREE-LICENSE.txt).
 
-The rock, wood and sand textures come from Poly Haven under [CC0](https://polyhaven.com/license): [Rock Boulder Dry](https://polyhaven.com/a/rock_boulder_dry), [Rough Wood](https://polyhaven.com/a/rough_wood) and [Sand 01](https://polyhaven.com/a/sand_01). Reefscape's rock mesh, pore maps, coral texture and organism meshes are procedural, generated by the scripts in `tools/`.
+The rock, wood and sand textures come from Poly Haven under [CC0](https://polyhaven.com/license): [Rock Boulder Dry](https://polyhaven.com/a/rock_boulder_dry), [Rough Wood](https://polyhaven.com/a/rough_wood) and [Sand 01](https://polyhaven.com/a/sand_01). Reefscape's rock mesh, pore maps, coral texture and organism meshes are procedural, generated by the scripts in `tools/`. The pixel scenes' art is drawn by their own code; `node tools/pixel-snapshot.mjs moonspire docs/images/moonspire-wide.png` (or `pixelreef`) renders their gallery stills without a browser.

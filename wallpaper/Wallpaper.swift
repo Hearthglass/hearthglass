@@ -19,15 +19,22 @@ let sceneHost = "local"
 
 /// The scenes the app can show, each a directory under scenes/ with a wallpaper.html.
 enum Habitat: String, CaseIterable {
-  case riverscape, reefscape
+  case riverscape, reefscape, moonspire, pixelreef
 
-  var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+  var title: String {
+    switch self {
+    case .pixelreef: "Pixel Reef"
+    default: rawValue.prefix(1).uppercased() + rawValue.dropFirst()
+    }
+  }
   var page: String { "/scenes/\(rawValue)/wallpaper.html" }
   /// What shows before the page has drawn anything, matched to each scene's own dark.
   var background: NSColor {
     switch self {
     case .riverscape: NSColor(calibratedRed: 0.031, green: 0.055, blue: 0.047, alpha: 1)
     case .reefscape: NSColor(calibratedRed: 0.043, green: 0.094, blue: 0.145, alpha: 1)
+    case .moonspire: NSColor(calibratedRed: 0.039, green: 0.039, blue: 0.114, alpha: 1)
+    case .pixelreef: NSColor(calibratedRed: 0.024, green: 0.086, blue: 0.161, alpha: 1)
     }
   }
 

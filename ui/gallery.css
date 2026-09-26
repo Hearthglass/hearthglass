@@ -24,6 +24,7 @@ h1, h2 { font: 400 var(--text-brand)/1 var(--font-body); letter-spacing: -.04em;
 .gallery.is-dragging .portal { cursor: grabbing; }
 .portal-image { filter: brightness(var(--brightness, 1)); position: relative; background: var(--surface); height: var(--plane-height); overflow: hidden; box-shadow: var(--image-shadow); }
 .portal img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform var(--motion-duration) var(--motion-ease); }
+.portal.pixel img { image-rendering: pixelated; }
 .portal-caption { display: flex; align-items: center; min-height: var(--control-height); margin-top: var(--space-3); visibility: hidden; }
 .is-active .portal-caption { visibility: visible; }
 .enter { display: inline-block; font: 400 var(--text-body) var(--font-body); letter-spacing: 0; margin-left: var(--space-3); transition: transform var(--motion-duration) var(--motion-ease); }

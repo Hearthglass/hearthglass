@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "license": "MIT",
   "type": "module",
-  "description": "Living desktop scenes for macOS: Riverscape, a freshwater aquarium, and Reefscape, a saltwater tank.",
+  "description": "Living desktop scenes for macOS and Windows: Riverscape and Reefscape aquariums, and two pixel-art scenes, Moonspire and Pixel Reef.",
   "scripts": {
     "start": "node serve.mjs",
     "wallpaper": "sh wallpaper/install.sh",
@@ -12,6 +12,6 @@
     "unwallpaper:win": "powershell -ExecutionPolicy Bypass -File wallpaper/uninstall.ps1",
     "build:win": "dotnet build wallpaper/windows/DesktopHabitats.csproj -c Release",
     "check": "node --check serve.mjs && for f in scenes/*/src/*.js scenes/shared/*.js ui/*.js; do node --check \"$f\" || exit 1; done",
-    "test": "node ui/tests/gallery.mjs && node scenes/riverscape/tests/fish-behavior.mjs && node scenes/riverscape/tests/population.mjs && node scenes/riverscape/tests/render-policy.mjs && node scenes/riverscape/tests/plant-budget.mjs && node scenes/reefscape/tests/behavior.mjs && node scenes/reefscape/tests/assets.mjs && node scenes/reefscape/tests/locomotion.mjs && node scenes/reefscape/tests/anemone.mjs && node scenes/reefscape/tests/antennae.mjs && node scenes/reefscape/tests/population.mjs"
+    "test": "node ui/tests/gallery.mjs && node scenes/riverscape/tests/fish-behavior.mjs && node scenes/riverscape/tests/population.mjs && node scenes/riverscape/tests/render-policy.mjs && node scenes/riverscape/tests/plant-budget.mjs && node scenes/reefscape/tests/behavior.mjs && node scenes/reefscape/tests/assets.mjs && node scenes/reefscape/tests/locomotion.mjs && node scenes/reefscape/tests/anemone.mjs && node scenes/reefscape/tests/antennae.mjs && node scenes/reefscape/tests/population.mjs && node scenes/shared/tests/pixel-engine.mjs && node scenes/moonspire/tests/moonspire.mjs && node scenes/pixelreef/tests/pixelreef.mjs"
   }
 }

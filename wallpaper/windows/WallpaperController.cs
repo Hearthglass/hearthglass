@@ -13,8 +13,7 @@ public class WallpaperController : ApplicationContext
     private readonly System.Windows.Forms.Timer _exposureTimer;
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _statusItem;
-    private readonly ToolStripMenuItem _riverscapeItem;
-    private readonly ToolStripMenuItem _reefscapeItem;
+    private readonly Dictionary<string, ToolStripMenuItem> _habitatItems = new();
     private readonly ToolStripMenuItem _feedItem;
     private readonly ToolStripMenuItem _addFishItem;
     private readonly Dictionary<string, ToolStripMenuItem> _populationItems = new();
@@ -64,10 +63,13 @@ public class WallpaperController : ApplicationContext
         contextMenu.Items.Add(new ToolStripSeparator());
 
         var envMenu = new ToolStripMenuItem("Environment");
-        _riverscapeItem = new ToolStripMenuItem("Riverscape", null, (_, _) => SelectHabitat("riverscape"));
-        _reefscapeItem = new ToolStripMenuItem("Reefscape", null, (_, _) => SelectHabitat("reefscape"));
-        envMenu.DropDownItems.Add(_riverscapeItem);
-        envMenu.DropDownItems.Add(_reefscapeItem);
+        foreach (var habitat in Habitats.All)
+        {
+            var id = habitat.Id;
+            var item = new ToolStripMenuItem(habitat.Title, null, (_, _) => SelectHabitat(id));
+            envMenu.DropDownItems.Add(item);
+            _habitatItems[id] = item;
+        }
         contextMenu.Items.Add(envMenu);
 
         var behaviourMenu = new ToolStripMenuItem("Fish behaviour");
@@ -188,8 +190,7 @@ public class WallpaperController : ApplicationContext
         _ = BuildWindowsAsync();
     }
 
-    private static string FormatTitle(string habitat) =>
-        char.ToUpperInvariant(habitat[0]) + habitat[1..];
+    private static string FormatTitle(string habitat) => Habitats.Find(habitat).Title;
 
     private static string ResolveAssetsRoot()
     {
@@ -292,8 +293,7 @@ public class WallpaperController : ApplicationContext
 
     private void UpdateMenuState()
     {
-        _riverscapeItem.Checked = _settings.Habitat == "riverscape";
-        _reefscapeItem.Checked = _settings.Habitat == "reefscape";
+        foreach (var (id, item) in _habitatItems) item.Checked = _settings.Habitat == id;
         _shyItem.Checked = _settings.FishBehaviour != "curious";
         _curiousItem.Checked = _settings.FishBehaviour == "curious";
         _clickToFeedItem.Checked = _settings.ClickToFeed;
