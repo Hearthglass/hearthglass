@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -16,7 +17,8 @@ public class WallpaperWindow : Form
     private int _rate = 0;
     private bool _battery = false;
     private double _cssScale = 1.0;
-    private string _fishBehaviour = "shy";
+    // The page has said its controls are ready since it last loaded.
+    private bool _controlsReady = false;
     private string _population = "normal";
     private string _quality = "detail";
     private bool _playModeActive = false;
@@ -25,6 +27,8 @@ public class WallpaperWindow : Form
     public string CurrentHabitat => _habitat;
     public int CurrentRate => _rate;
     public double CssScale => _cssScale;
+    // The scene has installed or changed its dock controls; true the first time after a load.
+    public event Action<WallpaperWindow, bool>? ControlsChanged;
 
     public WallpaperWindow(Screen screen, string assetsRoot, string habitat, string population, string quality)
     {
@@ -122,9 +126,29 @@ public class WallpaperWindow : Form
             };
         ");
 
+        // Plain strings are the page's console errors; objects are messages for the host.
         _webView.CoreWebView2.WebMessageReceived += (_, args) =>
         {
-            Logger.Info($"[Scene] {args.TryGetWebMessageAsString()}");
+            try
+            {
+                using var doc = JsonDocument.Parse(args.WebMessageAsJson);
+                var root = doc.RootElement;
+                if (root.ValueKind == JsonValueKind.String)
+                {
+                    Logger.Info($"[Scene] {root.GetString()}");
+                }
+                else if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("type", out var type) &&
+                         type.GetString() == "controls")
+                {
+                    bool first = !_controlsReady;
+                    _controlsReady = true;
+                    ControlsChanged?.Invoke(this, first);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Scene] Unreadable message: {ex.Message}");
+            }
         };
 
         _webView.NavigationCompleted += (_, args) =>
@@ -166,6 +190,7 @@ public class WallpaperWindow : Form
     private void LoadScene()
     {
         _loaded = false;
+        _controlsReady = false;
         // The scene stocks its tank and picks its render budget from the URL when it is built.
         var page = $"/scenes/{_habitat}/wallpaper.html?population={Uri.EscapeDataString(_population)}&quality={Uri.EscapeDataString(_quality)}";
         _webView.CoreWebView2.Navigate($"https://desktop-habitats.local{page}");
@@ -194,18 +219,39 @@ public class WallpaperWindow : Form
         LoadScene();
     }
 
-    public void AddFish()
+    // The scene's dock controls as JSON (see scenes/shared/host-controls.js), or null.
+    public async Task<string?> GetControlsJsonAsync()
     {
-        if (!_loaded || _rate <= 0) return;
-        _ = _webView.ExecuteScriptAsync("typeof window.habitatAddFish === 'function' && window.habitatAddFish();");
+        if (!_loaded || !_controlsReady) return null;
+        try
+        {
+            var result = await _webView.ExecuteScriptAsync(
+                "typeof window.habitatControls === 'function' ? JSON.stringify(window.habitatControls()) : null");
+            return result == "null" ? null : JsonSerializer.Deserialize<string>(result);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[WallpaperWindow] Could not read the scene's controls: {ex.Message}");
+            return null;
+        }
     }
 
-    // One fish into the tank right under a point on the screen.
-    public void AddFishPhysical(Point physPoint)
+    // Runs a dock action, or sets a toggle or choice to a JSON value.
+    public void RunControl(string id, string? valueJson)
+    {
+        if (!_loaded || !_controlsReady) return;
+        var value = string.IsNullOrEmpty(valueJson) ? "undefined" : valueJson;
+        _ = _webView.ExecuteScriptAsync(
+            $"typeof window.habitatControl === 'function' && window.habitatControl({JsonSerializer.Serialize(id)}, {value});");
+    }
+
+    // A click with a dock tool, at a point on the screen.
+    public void UseTap(string tool, Point physPoint)
     {
         if (!_loaded || _rate <= 0) return;
         var (x, y) = ToCss(physPoint);
-        _ = _webView.ExecuteScriptAsync($"typeof window.habitatAddFish === 'function' && window.habitatAddFish({x}, {y});");
+        _ = _webView.ExecuteScriptAsync(
+            $"typeof window.habitatUse === 'function' && window.habitatUse({JsonSerializer.Serialize(tool)}, {{ phase: 'tap', x: {x}, y: {y} }});");
     }
 
     private (string X, string Y) ToCss(Point physPoint)
@@ -215,15 +261,16 @@ public class WallpaperWindow : Form
         return (cssX.ToString("F1", CultureInfo.InvariantCulture), cssY.ToString("F1", CultureInfo.InvariantCulture));
     }
 
-    // A drag over the tank. The scene decides what a drag that starts is for: begun on the
-    // fish it is holding selected it picks them up ("herd"), anywhere else it draws a marquee
-    // ("select"). Points may lie off this screen; a marquee spanning monitors is shared.
-    public async Task<string> BeginDragPhysical(Point start, Point current)
+    // A drag with a dock tool. The scene decides what a drag that starts is for: for the
+    // fish, begun on the ones held selected it picks them up ("herd"), anywhere else it draws
+    // a marquee ("select"); a scene may also just take it ("herd") or ignore it ("none").
+    // Points may lie off this screen; a marquee spanning monitors is shared.
+    public async Task<string> BeginDragPhysical(string tool, Point start, Point current)
     {
         if (!_loaded || _rate <= 0) return "none";
         try
         {
-            var result = await _webView.ExecuteScriptAsync(DragScript("start", start, current));
+            var result = await _webView.ExecuteScriptAsync(DragScript(tool, "start", start, current));
             return result.Trim('"');
         }
         catch
@@ -233,17 +280,17 @@ public class WallpaperWindow : Form
     }
 
     // "move", "end" or "cancel".
-    public void DragPhysical(string phase, Point start, Point current)
+    public void DragPhysical(string tool, string phase, Point start, Point current)
     {
         if (!_loaded) return;
-        _ = _webView.ExecuteScriptAsync(DragScript(phase, start, current));
+        _ = _webView.ExecuteScriptAsync(DragScript(tool, phase, start, current));
     }
 
-    private string DragScript(string phase, Point start, Point current)
+    private string DragScript(string tool, string phase, Point start, Point current)
     {
         var (x0, y0) = ToCss(start);
         var (x, y) = ToCss(current);
-        return $"typeof window.habitatDrag === 'function' ? window.habitatDrag({{ phase: '{phase}', x0: {x0}, y0: {y0}, x: {x}, y: {y} }}) : 'none';";
+        return $"typeof window.habitatUse === 'function' ? window.habitatUse({JsonSerializer.Serialize(tool)}, {{ phase: '{phase}', x0: {x0}, y0: {y0}, x: {x}, y: {y} }}) : 'none';";
     }
 
     public bool SetRate(int wanted)
@@ -332,13 +379,6 @@ public class WallpaperWindow : Form
         _ = _webView.ExecuteScriptAsync($"window.habitatClick && window.habitatClick({x}, {y});");
     }
 
-    public void SetFishBehaviour(string behaviour)
-    {
-        _fishBehaviour = behaviour;
-        if (!_loaded) return;
-        _ = _webView.ExecuteScriptAsync($"typeof window.habitatMode === 'function' && window.habitatMode('{_fishBehaviour}');");
-    }
-
     public void SetPlayMode(bool active)
     {
         _playModeActive = active;
@@ -361,7 +401,6 @@ public class WallpaperWindow : Form
         _ = _webView.ExecuteScriptAsync($@"
             typeof window.habitatPower === 'function' && window.habitatPower({bat});
             typeof window.habitatRate === 'function' && window.habitatRate({_rate});
-            typeof window.habitatMode === 'function' && window.habitatMode('{_fishBehaviour}');
             typeof window.habitatPlayMode === 'function' && window.habitatPlayMode({play});
         ");
     }

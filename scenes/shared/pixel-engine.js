@@ -410,6 +410,32 @@ export class Surface {
 }
 
 /**
+ * The opaque runs of a full-screen layer, as [offset, length] pairs: baked once, they let
+ * `blitRuns` copy a mostly-clear layer without testing every pixel each frame.
+ */
+export function opaqueRuns(src) {
+  const d = src.data, n = d.length, out = [];
+  let i = 0;
+  while (i < n) {
+    while (i < n && d[i] === CLEAR) i++;
+    const start = i;
+    while (i < n && d[i] !== CLEAR) i++;
+    if (i > start) out.push(start, i - start);
+  }
+  return Int32Array.from(out);
+}
+
+/** Copy `src` onto a same-sized `dst` along runs from `opaqueRuns(src)`. */
+export function blitRuns(dst, src, runs) {
+  const dd = dst.data, sd = src.data;
+  for (let r = 0; r < runs.length; r += 2) {
+    const o = runs[r], end = o + runs[r + 1];
+    if (end - o > 24) dd.set(sd.subarray(o, end), o);
+    else for (let i = o; i < end; i++) dd[i] = sd[i];
+  }
+}
+
+/**
  * Presents a Surface on a canvas: expands indices through the palette into an offscreen
  * image at logical size, then draws it scaled by a whole number with smoothing off.
  * The logical size is chosen so that about `targetRows` rows fill the screen height;

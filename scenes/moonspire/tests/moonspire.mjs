@@ -8,14 +8,17 @@ const L = D.layout;
 const moon = D.moonCtl.moon;
 const wizard = D.wiz.wizard;
 const state = () => scene.stats();
+const K = L.k;
 
-// The screen is about 180 pixels tall at a whole-number scale, and the layout fits it.
+// The screen is about 360 pixels tall at a whole-number scale, and the layout fits it.
 {
   const s = app.presenter.state;
-  assert.equal(s.scale, 4);
-  assert.equal(s.width, 320); assert.equal(s.height, 180);
-  assert(L.moonX > L.wizardX + 60, 'the moon is across the sky from the wizard');
-  assert(L.groundY > L.horizonY && L.groundY < s.height - 20);
+  assert.equal(s.scale, 2);
+  assert.equal(s.width, 640); assert.equal(s.height, 360);
+  assert.equal(L.u, 2, 'the fine grid draws the detailed art');
+  assert(L.moonX > L.wizardX + 60 * K, 'the moon is across the sky from the wizard');
+  assert(L.groundY > L.horizonY && L.groundY < s.height - 20 * K);
+  assert(D.tower.turret.on && D.tower.scope.on && D.tower.orrery.on, 'a wide screen has room for the turret, telescope and orrery');
   app.seconds(1);
   assertAllInPalette(assert, app.render(), scene.palette, 'first frame');
 }
@@ -138,26 +141,111 @@ const state = () => scene.stats();
 // The other residents: the owl takes flight and comes home, the brazier flares, the
 // wizard twirls, and the tray's "Add a fish" adds fireflies up to a limit.
 {
-  const owl = D.rampart.owl;
-  app.hostClick(owl.x + 4, owl.y + 5);
+  const owl = D.tower.owl;
+  app.hostClick(owl.x + 4 * K, owl.y + 5 * K);
   assert.equal(owl.state, 'fly');
   app.seconds(30);
   assert.equal(owl.state, 'perch', 'the owl returns to its battlement');
-  app.hostClick(D.rampart.brazier.x, D.rampart.brazier.y - 6);
-  assert.equal(D.rampart.brazier.flare, 1);
-  app.hostClick(L.wizardX, L.groundY - 20);
+  app.hostClick(D.tower.brazier.x, D.tower.brazier.y - 6 * K);
+  assert.equal(D.tower.brazier.flare, 1);
+  app.hostClick(L.wizardX, L.groundY - 20 * K);
   assert.equal(wizard.state, 'twirl');
+  app.seconds(2);
+  // the observatory's instruments answer a tap too
+  app.hostClick(D.tower.orrery.x, L.groundY - 33 * K);
+  assert(D.tower.orrery.speed > 5, 'the orrery spins up');
+  const lamp = D.tower.lantern;
+  app.hostClick(lamp.x, lamp.y + 11 * K);
+  assert(lamp.swing > 0.2, 'the lantern swings');
+  const scope = D.tower.scope;
+  app.seconds(3);
+  app.hostClick(scope.x + Math.cos(scope.angle) * 20 * K, scope.y + Math.sin(scope.angle) * 20 * K);
+  assert(scope.glint > 0.9, 'the telescope catches the light');
+  assert.equal(wizard.state, 'look', 'and the wizard looks up for the shooting star');
   let added = 0;
   while (globalThis.habitatAddFish(100, 100) && added < 100) added++;
   assert(added > 0 && added < 100, 'fireflies are capped');
 }
 
+// The wallpaper dock: the scene lists its own controls, and each one does its thing.
+{
+  app.seconds(30);
+  const manifest = globalThis.habitatControls();
+  const ids = manifest.controls.map(control => control.id);
+  for (const id of ['action', 'fireworks', 'meteors', 'bats', 'owl', 'touch', 'add', 'sky']) assert(ids.includes(id), `the dock offers ${id}`);
+  assert(manifest.accent, 'the dock is tinted to the scene');
+  for (const control of manifest.controls) {
+    assert(control.label && control.icon && control.kind, `${control.id} is labelled`);
+    if (control.kind === 'tool') assert(['desktop', 'overlay'].includes(control.capture), `${control.id} says how it takes the mouse`);
+  }
+
+  // A fireworks volley: bolts leave the staff one after another and burst in the sky.
+  globalThis.habitatControl('fireworks');
+  assert.equal(wizard.state, 'twirl');
+  let bolts = 0;
+  for (let k = 0; k < 60 * 4; k++) { app.seconds(1 / 60); bolts = Math.max(bolts, D.projectiles.filter(p => p.alive).length); }
+  assert(bolts >= 2, `several bolts in the air at once (${bolts})`);
+  assertAllInPalette(assert, app.render(), scene.palette, 'fireworks');
+  assert.equal(moon.state, 'intact', 'the fireworks keep clear of the moon');
+  app.seconds(4);
+
+  // A meteor shower: shooting stars streak across from the same side.
+  globalThis.habitatControl('meteors');
+  let streaks = 0;
+  for (let k = 0; k < 60 * 3; k++) { app.seconds(1 / 60); streaks = Math.max(streaks, D.meteors.filter(m => m.alive).length); }
+  assert(streaks >= 2, `meteors overlap (${streaks})`);
+  assert(D.meteors.every(m => !m.alive || m.vx < 0), 'they share a radiant');
+  assertAllInPalette(assert, app.render(), scene.palette, 'meteor shower');
+  app.seconds(4);
+  assert(D.meteors.every(m => !m.alive), 'and burn out');
+
+  // The owl and the bats.
+  globalThis.habitatControl('owl');
+  assert.equal(D.tower.owl.state, 'fly');
+  globalThis.habitatControl('bats');
+  app.seconds(30);
+
+  // The sky: snow falls and settles out of the way, the aurora fades in, clear is clear.
+  globalThis.habitatControl('sky', 'snow');
+  assert.equal(globalThis.habitatControls().controls.find(c => c.id === 'sky').value, 'snow');
+  const before = D.particles.count;
+  app.seconds(6);
+  assert(D.particles.count > before + 100, 'snow is falling');
+  assertAllInPalette(assert, app.render(), scene.palette, 'snow');
+  globalThis.habitatControl('sky', 'aurora');
+  app.seconds(4);
+  assert(D.aurora > 0.9, 'the aurora comes up');
+  const lit = app.render();
+  assertAllInPalette(assert, lit, scene.palette, 'aurora');
+  globalThis.habitatControl('sky', 'clear');
+  app.seconds(20);
+  assert.equal(D.aurora, 0, 'and fades again');
+  assert(D.particles.count < 200, 'the snow has all landed');
+
+  // Tools: the wand plays like a finger (a tap on the sky is a small firework), the
+  // firefly tool lets one loose where the desktop was clicked.
+  const scale = app.presenter.state.scale;
+  assert.equal(globalThis.habitatUse('touch', { phase: 'tap', x: L.W * 0.6 * scale, y: L.horizonY * 0.4 * scale }), 'none');
+  assert.equal(wizard.state, 'cast', 'a wand tap casts at once');
+  app.seconds(3);
+  assert.equal(globalThis.habitatUse('touch', { phase: 'start', x0: L.moonX * scale, y0: L.moonY * scale, x: L.moonX * scale, y: L.moonY * scale }), 'herd');
+  app.seconds(0.5);
+  assert.equal(wizard.state, 'charge', 'holding the wand charges');
+  globalThis.habitatUse('touch', { phase: 'end', x0: L.moonX * scale, y0: L.moonY * scale, x: L.moonX * scale, y: L.moonY * scale });
+  app.seconds(0.1);
+  assert.equal(wizard.state, 'cast');
+  app.seconds(30);
+  assert.equal(globalThis.habitatUse('touch', { phase: 'start', x0: L.W * 0.6 * scale, y0: (L.groundY + 8) * scale, x: L.W * 0.6 * scale, y: (L.groundY + 8) * scale }), 'none', 'the wand never draws a marquee');
+  globalThis.habitatUse('touch', { phase: 'cancel', x0: 0, y0: 0, x: 0, y: 0 });
+}
+
 // Portrait and ultrawide screens lay out without the battlements covering the wizard.
-for (const [w, h] of [[390, 844], [3440, 1440]]) {
+for (const [w, h] of [[390, 844], [3440, 1440], [1920, 1080]]) {
   const size = D.layout;
-  scene.resize(Math.round(w / Math.max(1, Math.round(h / 180))), Math.round(h / Math.max(1, Math.round(h / 180))));
+  const scale = Math.max(1, Math.round(h / 360));
+  scene.resize(Math.round(w / scale), Math.round(h / scale));
   const l = D.layout;
-  assert(l.wizardX > 10 && l.moonX < l.W - l.moonR, `${w}x${h}: wizard and moon on screen`);
+  assert(l.wizardX > 10 * l.k && l.moonX < l.W - l.moonR, `${w}x${h}: wizard and moon on screen`);
   const surface = app.surface;
   surface.resize(l.W, l.H);
   scene.update(1 / 60, 0);
@@ -165,4 +253,32 @@ for (const [w, h] of [[390, 844], [3440, 1440]]) {
   void size;
 }
 
-console.log('PASS: moonspire charge, crack, heal, burst, mend, backfire, host clicks and drags, tray spell, residents and layouts');
+// A collapsed or hidden canvas (a pixel or two across) still lays out and draws.
+for (const [w, h] of [[1, 1], [24, 12], [2, 600]]) {
+  scene.resize(w, h);
+  app.surface.resize(w, h);
+  scene.update(1 / 60, 0);
+  assertAllInPalette(assert, app.render(), scene.palette, `${w}x${h}`);
+}
+
+// Eco draws the coarse 180-row grid, and the quality menu switches grids live.
+{
+  const select = app.elements.get('#quality');
+  select.value = 'eco';
+  select.dispatch('change', {});
+  assert.equal(app.presenter.state.height, 180, 'eco keeps the chunky grid');
+  assert.equal(D.layout.u, 1);
+  app.seconds(2);
+  assertAllInPalette(assert, app.render(), scene.palette, 'eco frame');
+  const owl = D.tower.owl;
+  app.hostClick(owl.x + 4, owl.y + 5);
+  assert.equal(owl.state, 'fly', 'the coarse grid is still hit-tested at its own scale');
+  select.value = 'balanced';
+  select.dispatch('change', {});
+  assert.equal(app.presenter.state.height, 360, 'switching back redraws on the fine grid');
+  assert.equal(D.layout.u, 2);
+  app.seconds(1);
+  assertAllInPalette(assert, app.render(), scene.palette, 'after switching quality');
+}
+
+console.log('PASS: moonspire charge, crack, heal, burst, mend, backfire, host clicks and drags, tray spell, residents, instruments, dock controls (fireworks, meteors, snow, aurora, wand), layouts and quality grids');

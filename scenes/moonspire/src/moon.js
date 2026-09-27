@@ -40,11 +40,16 @@ export function createMoon(random) {
     base.resize(size, size, CLEAR);
     base.clear(CLEAR);
     const L = [0.42, -0.28, 0.86];
+    // shading offsets below are in steps of a six-colour ramp; stretch them to ours
+    const step = (MOON.length - 1) / 5;
+    const fine = r > 22;
     const craters = [];
-    for (let k = 0; k < 9; k++) {
+    for (let k = 0; k < 9 + (fine ? 6 : 0); k++) {
       const a = random() * Math.PI * 2, d = Math.sqrt(random()) * 0.8;
-      craters.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, r: 0.07 + random() * 0.12 });
+      craters.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, r: (0.07 + random() * 0.12) * (k > 8 ? 0.55 : 1) });
     }
+    // one young crater throws bright rays across the face
+    const ray = { x: -0.25, y: 0.42, r: 0.06 };
     const cx = r + 1, cy = r + 1;
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
       const dx = x - cx, dy = y - cy;
@@ -53,16 +58,26 @@ export function createMoon(random) {
       const lambert = nx * L[0] + ny * L[1] + nz * L[2];
       let level = clamp(0.35 + lambert * 0.75, 0, 1) * (MOON.length - 1);
       const maria = noise.fbm2(nx * 2.3 + 4, ny * 2.3 + 1, 4);
-      if (maria > 0.5) level -= 1.1;
-      if (maria > 0.6) level -= 0.5;
+      if (maria > 0.5) level -= 1.1 * step;
+      if (maria > 0.6) level -= 0.5 * step;
       for (const cr of craters) {
         const qx = nx - cr.x, qy = ny - cr.y, q = Math.hypot(qx, qy) / cr.r;
         if (q < 1) {
-          level -= 0.7;
+          level -= 0.7 * step;
           // lit inner wall faces away from the light, shaded wall faces it
           const facing = (qx * L[0] + qy * L[1]) / (Math.hypot(qx, qy) || 1);
-          if (q > 0.55) level += facing > 0.2 ? 1.3 : facing < -0.3 ? -0.6 : 0;
-        } else if (q < 1.25) level += 0.35;
+          if (q > 0.55) level += facing > 0.2 ? 1.3 * step : facing < -0.3 ? -0.6 * step : 0;
+        } else if (q < 1.25) level += 0.35 * step;
+      }
+      if (fine) {
+        const rx = nx - ray.x, ry = ny - ray.y, rd = Math.hypot(rx, ry);
+        const spoke = Math.abs(Math.sin(Math.atan2(ry, rx) * 7 + 0.6));
+        if (rd < ray.r) level += 1.2 * step;
+        else if (rd < 0.7 && spoke > 0.93 && noise.n2(nx * 9, ny * 9) > 0.35) level += 0.9 * step * (1 - rd / 0.7);
+        // pocked highlands: tiny craterlets
+        if (noise.n2(nx * 14 + 3, ny * 14) > 0.8) level -= 0.8 * step;
+        // a thin bright limb on the lit side
+        if (nz < 0.3 && lambert > 0.25) level += 0.6 * step;
       }
       let k = Math.floor(level);
       if (level - k > bayer(x, y)) k++;
@@ -243,6 +258,7 @@ export function createMoon(random) {
         for (let p = 0; p < pts.length; p += 2) {
           const x = mx + pts[p], y = my + pts[p + 1];
           surface.pset(x, y, glow > 0.55 ? c('cyan5') : glow > 0.25 ? c('cyan3') : c('moon0'));
+          if (moon.r > 22 && glow <= 0.25) surface.pset(x - 1, y, c('moon1'));
           // lit lip on the lower-right edge of each crack
           if (glow < 0.25) surface.pmap(x + 1, y + 1, palette.lighter);
         }

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Desktop Habitats dock</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="dock.css" />
+  </head>
+  <body>
+    <!-- The wallpaper host's control dock. The host sizes its window to fit whatever is
+         drawn here and sends the state with window.dockState(); see dock.js. -->
+    <div id="dock" class="collapsed" data-edge="bottom" aria-label="Scene controls">
+      <div class="card">
+        <div class="sheet" id="sheet" hidden></div>
+        <div class="hint" id="hint" aria-live="polite"></div>
+        <div class="bar" id="bar" role="toolbar"></div>
+      </div>
+      <div class="handle" id="handle" aria-hidden="true"><span class="handle-tool" id="handle-tool"></span><span class="grip"></span></div>
+    </div>
+    <script type="module" src="dock.js"></script>
+  </body>
+</html>

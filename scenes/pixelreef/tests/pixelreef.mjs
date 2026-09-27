@@ -192,4 +192,29 @@ const count = kind => fish.filter(f => f.kind === kind).length;
   assert.equal(app.hostDrag('end', 40, y, 130, y), 'herd');
 }
 
-console.log('PASS: pixel reef sprites, stocking, feeding, hand-feeding, stirring, puffer, chest, octopus, crab, jellyfish, shy and curious fish, night, tray commands and host drags');
+// The wallpaper dock: its own controls, the light as a toggle, mood as a choice.
+{
+  const find = id => globalThis.habitatControls().controls.find(control => control.id === id);
+  for (const id of ['action', 'touch', 'add', 'lights', 'mood']) assert(find(id), `the dock offers ${id}`);
+  assert.equal(find('lights').value, true);
+  globalThis.habitatControl('lights', false);
+  app.seconds(8);
+  assert.equal(scene.stats().night, 1, 'the dock turns the light off');
+  assert.equal(find('lights').value, false);
+  globalThis.habitatControl('lights', false);
+  assert.equal(find('lights').value, false, 'setting a toggle to what it is changes nothing');
+  globalThis.habitatControl('lights', true);
+  app.seconds(8);
+  assert.equal(scene.stats().night, 0);
+  globalThis.habitatControl('mood', 'curious');
+  assert.equal(find('mood').value, 'curious');
+  globalThis.habitatControl('mood', 'shy');
+  const food = D.props.foodCount();
+  globalThis.habitatControl('action');
+  assert(D.props.foodCount() > food, 'the dock feeds');
+  const y = (L.surfaceY + L.floorY) / 2, scale = app.presenter.state.scale;
+  assert.equal(globalThis.habitatUse('touch', { phase: 'start', x0: 40 * scale, y0: y * scale, x: 50 * scale, y: y * scale }), 'herd');
+  globalThis.habitatUse('touch', { phase: 'end', x0: 40 * scale, y0: y * scale, x: 60 * scale, y: y * scale });
+}
+
+console.log('PASS: pixel reef sprites, stocking, feeding, hand-feeding, stirring, puffer, chest, octopus, crab, jellyfish, shy and curious fish, night, tray commands, host drags and dock controls');

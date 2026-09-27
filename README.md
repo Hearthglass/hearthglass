@@ -4,7 +4,7 @@
 
 Have you always wanted an aquarium? Now you can have it, right on your desktop :)
 
-The fish react to your cursor and compete for food, while the plants sway in a slow current. There are four environments: two 3D aquariums, **Riverscape**, a planted freshwater tank, and **Reefscape**, a saltwater tank; and two pixel-art scenes, **Moonspire**, a wizard on a moonlit rampart, and **Pixel Reef**, a hand-pixelled reef tank.
+The fish react to your cursor and compete for food, while the plants sway in a slow current. There are four environments: two 3D aquariums, **Riverscape**, a planted freshwater tank, and **Reefscape**, a saltwater tank; and two pixel-art scenes, **Moonspire**, a wizard atop his moonlit observatory, and **Pixel Reef**, a hand-pixelled reef tank.
 
 ![Reefscape, a saltwater tank with clownfish around an anemone](docs/images/reefscape-wide.png)
 
@@ -12,14 +12,14 @@ The aquariums are rendered live with Three.js and WebGL2. Everything runs locall
 
 ## The pixel scenes
 
-![Moonspire, a pixel-art wizard charging his staff on a castle rampart under the moon](docs/images/moonspire-wide.png)
+![Moonspire, a pixel-art wizard charging his staff on the roof of his observatory under the moon](docs/images/moonspire-wide.png)
 
-**Moonspire** is a wizard on the battlements of his tower, a brazier crackling beside him and an owl on the wall. Everything in it is interactive:
+**Moonspire** is a wizard on the roof of his observatory tower: a copper-domed turret, a brass telescope trained on the moon, an orrery, books, potions, a lantern and a crackling brazier, with an owl on the balustrade and a river valley, a village and a castle below. Everything in it is interactive:
 
 - **Hold on the moon** and he raises his staff to charge a spell: sparks spiral into the gem, runes turn at his feet and the staff crackles once it is full. Let go and the bolt flies. A short hold cracks the moon; a full charge, or enough small ones, blows it apart. He looks as surprised as you are, loses his hat, then mends the moon piece by piece.
 - **Don't hold it too long.** Kept at full power for a few seconds, the spell goes off in his face.
 - **Tap or hold on the sky** for fireworks, bigger the longer you charge.
-- **Tap the owl**, the **brazier** or the **wizard** himself. Left alone, he amuses himself now and then.
+- **Tap the owl**, the **brazier**, the **lantern**, the **orrery** or the **wizard** himself; tap the **telescope** and he spots a shooting star. Left alone, he amuses himself now and then.
 
 ![Pixel Reef, a pixel-art reef tank with tangs, clownfish, jellyfish and an octopus](docs/images/pixelreef-wide.png)
 
@@ -29,7 +29,7 @@ The aquariums are rendered live with Three.js and WebGL2. Everything runs locall
 - **Tap the pufferfish** to make it puff up, or hold to keep it puffed. Tap the **treasure chest**, the **castle**, the **octopus's cave** (twice, if you dare), the **crab**, a **jellyfish** or the **anemone**.
 - **L** (or the lamp button) switches the tank light off: the jellyfish and some corals glow in the dark. On the desktop the light follows the clock, going off in the evening.
 
-Both are drawn at about 180 pixels tall and scaled up by a whole number, so pixels stay square and crisp on any screen; the scene widens to fit the screen's shape instead of letterboxing. Every colour on screen comes from a fixed palette: light, shadow, glow and fog are lookup tables from one palette colour to another, blended with an ordered dither. In testing, a frame took about 2 ms of CPU to draw, and up to about 9 ms while the moon explodes.
+Moonspire is drawn at about 360 pixels tall (180 in Eco quality, for a chunkier, more retro look) and Pixel Reef at about 180, each scaled up by a whole number so pixels stay square and crisp on any screen; the scene widens to fit the screen's shape instead of letterboxing. Every colour on screen comes from a fixed palette of hue-shifted ramps: light, shadow, glow and fog are lookup tables from one palette colour to another, blended with an ordered dither. In testing, a frame took about 2 ms of CPU to draw, Moonspire's explosions included.
 
 ## Install on Mac
 
@@ -92,7 +92,7 @@ On Windows the tray menu also has:
 - **Add a fish** sends one more fish swimming in from the side of the tank under your cursor, up to 20 extra. Added fish last until the population changes or the app restarts.
 - **Click to feed**: a single click on empty desktop drops a pinch of food at that spot. Clicks on icons, double-clicks and quick repeats are ignored.
 - **Select fish by dragging**: fish inside the blue box Windows draws when you drag on the desktop light up and turn to look.
-- **Play mode** (or **Ctrl+Alt+F**): the desktop stops responding to the mouse so you can play with the fish. Drag to select fish, drag again to herd them, right-click to feed, and press Esc or Ctrl+Alt+F to leave. Play mode also ends by itself after a minute without input.
+- **Play with the wallpaper** (or **Ctrl+Alt+F**): the desktop stops responding to the mouse so you can play with the fish. Drag to select fish, drag again to herd them, right-click to feed, and press Esc, Ctrl+Alt+F or the **Done** button on the banner to stop. The taskbar stays usable throughout, and play ends by itself after a minute without input.
 
 In the pixel scenes the same controls do what makes sense there: **Add a fish** adds a firefly to Moonspire, a click is a tap (a quick spell, a pinch of food, a poke), and a drag is a held press (charging a spell, stirring the water). In play mode, press and hold still for a moment to charge a spell or hand-feed; right-click taps.
 

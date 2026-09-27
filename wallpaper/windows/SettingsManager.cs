@@ -8,13 +8,19 @@ public class AppSettings
     public string Habitat { get; set; } = "riverscape";
     public bool Paused { get; set; } = false;
     public bool StartWithWindows { get; set; } = false;
-    public bool ClickToFeed { get; set; } = false;
+    // Only read to carry an old shy/curious choice over into SceneValues.
     public string FishBehaviour { get; set; } = "shy";
-    public bool SelectFish { get; set; } = false;
     public string Population { get; set; } = "normal";
     // Render quality passed to the scenes: "eco", "balanced" or "detail". Detail draws a
     // screen at full resolution; the lower two cap the pixel count and frame rate.
     public string Quality { get; set; } = "detail";
+    // The control dock: shown at all, and at the "bottom" or "top" of the main screen.
+    public bool DockEnabled { get; set; } = true;
+    public string DockEdge { get; set; } = "bottom";
+    // The dock opens by itself once, so it is found.
+    public bool DockIntroShown { get; set; } = false;
+    // Each scene's toggles and choices from the dock, as JSON values by control id.
+    public Dictionary<string, Dictionary<string, string>> SceneValues { get; set; } = new();
 }
 
 public static class SettingsManager
@@ -38,6 +44,15 @@ public static class SettingsManager
                 {
                     // A scene that is no longer shipped falls back to the first one.
                     settings.Habitat = Habitats.Find(settings.Habitat).Id;
+                    settings.SceneValues ??= new();
+                    // The old tray-wide fish behaviour becomes each fish scene's mood.
+                    foreach (var fishScene in new[] { "riverscape", "reefscape", "pixelreef" })
+                    {
+                        if (!settings.SceneValues.TryGetValue(fishScene, out var values))
+                            settings.SceneValues[fishScene] = values = new();
+                        if (!values.ContainsKey("mood"))
+                            values["mood"] = JsonSerializer.Serialize(settings.FishBehaviour == "curious" ? "curious" : "shy");
+                    }
                     return settings;
                 }
             }

@@ -4,6 +4,7 @@
 //
 // A scene is an object with:
 //   palette, rows?                        the palette to present with and target row count
+//   rowsFor?(quality)                     target row count per quality level (overrides rows)
 //   resize(width, height)                 logical size changed (also called once at start)
 //   update(dt, time)                      one fixed step (dt = 1/60 s)
 //   render(surface, time)                 draw the whole frame into the surface
@@ -13,11 +14,16 @@
 //   hint?                                 one line shown briefly on load in a browser
 //   setMode?(mode) / setPlayMode?(active) / stats?()
 //   buttons?: [{ id, icon, label, key, run, pressed? }]  extra footer buttons
+//   accent?, hostControls?()              the wallpaper dock's controls (see host-controls.js):
+//     'action' runs action('host'), 'mood' is setMode, a toggle named after a button runs
+//     it, the 'touch' tool plays with the scene like a finger and 'add' is addCreature;
+//     anything else goes to control?(id, value) and use?(tool, gesture, toLogical)
 
 import { Surface, createPresenter } from './pixel-engine.js';
 import { createFrameLoop } from './frame-loop.js';
 import { setActionIcon } from '../../ui/icons.js';
 import { reportSceneError } from './controls.js';
+import { installHostControls } from './host-controls.js';
 
 export const STEP = 1 / 60;
 const clampRows = rows => Math.max(60, Math.min(400, rows));
@@ -61,11 +67,18 @@ export function runPixelScene(createScene) {
     const p = x === undefined ? null : presenter.toLogical(x, y);
     return scene.addCreature(p?.x, p?.y);
   };
-  // Host drags (CSS px): the scene treats them like a held pointer.
+  // Host drags (CSS px): the scene treats them like a held pointer. A tap is a press and
+  // an immediate release, the same as a click from the host.
   let hostDrag = false;
   window.habitatDrag = gesture => {
     if (!scene || !presenter) return 'none';
     const p = presenter.toLogical(gesture.x, gesture.y);
+    if (gesture.phase === 'tap') {
+      scene.press(p.x, p.y, { source: 'host-click' });
+      scene.release(p.x, p.y);
+      loop?.invalidate();
+      return 'none';
+    }
     if (gesture.phase === 'start') {
       const start = presenter.toLogical(gesture.x0, gesture.y0);
       hostDrag = scene.press(start.x, start.y, { source: 'host-drag' }) !== false;
@@ -99,6 +112,9 @@ export function runPixelScene(createScene) {
       setTimeout(() => { loading.hidden = true; }, 400);
     }
   }
+
+  // ?rows= overrides the target row count: fewer rows, bigger pixels (handy for inspecting art).
+  const targetRows = () => Number(params.get('rows')) || scene.rowsFor?.(quality) || scene.rows;
 
   function resize() {
     if (!presenter) return;
@@ -205,6 +221,8 @@ export function runPixelScene(createScene) {
       quality = Object.hasOwn(PIXEL_QUALITY, select.value) ? select.value : 'balanced';
       try { localStorage.setItem('habitat-quality', quality); } catch {}
       scene.setQuality?.(quality);
+      const rows = targetRows();
+      if (rows && rows !== presenter.state.rows) { presenter.setRows(clampRows(rows)); resize(); }
       applyRate();
     });
     document.addEventListener('keydown', event => {
@@ -228,8 +246,7 @@ export function runPixelScene(createScene) {
   try {
     presenter = createPresenter(canvas, { targetRows: 180 });
     scene = createScene({ params, isHost, capture, quality });
-    // ?rows= overrides the target row count: fewer rows, bigger pixels (handy for inspecting art).
-    const rows = Number(params.get('rows')) || scene.rows;
+    const rows = targetRows();
     if (rows) presenter.setRows(clampRows(rows));
     const { width, height } = presenter.state;
     surface.resize(width, height);
@@ -249,6 +266,28 @@ export function runPixelScene(createScene) {
         battery.addEventListener('chargingchange', update);
       }).catch(() => {});
     }
+    installHostControls({
+      accent: scene.accent,
+      population: Boolean(scene.setPopulation),
+      controls: () => scene.hostControls?.() || [],
+      control(id, value) {
+        const button = (scene.buttons || []).find(spec => spec.id === id);
+        if (id === 'action') scene.action('host');
+        else if (id === 'mood') scene.setMode?.(value === 'curious' ? 'curious' : 'shy');
+        else if (button) { if (!button.pressed || Boolean(button.pressed()) !== Boolean(value)) button.run(); }
+        else scene.control?.(id, value);
+        refreshControls();
+        loop?.invalidate();
+      },
+      use(tool, gesture) {
+        // (a press on nothing in particular is not a marquee here)
+        if (tool === 'touch') { const answer = window.habitatDrag(gesture); return answer === 'select' ? 'none' : answer; }
+        if (tool === 'add') { if (gesture.phase === 'tap') window.habitatAddFish(gesture.x, gesture.y); return 'none'; }
+        const answer = scene.use?.(tool, gesture, (x, y) => presenter.toLogical(x, y));
+        loop?.invalidate();
+        return answer;
+      },
+    });
     for (const fn of pending.splice(0)) fn();
     window.habitatStats = () => ({
       width: presenter.state.width, height: presenter.state.height, scale: presenter.state.scale,

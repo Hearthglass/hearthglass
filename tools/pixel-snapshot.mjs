@@ -11,7 +11,9 @@ import { deflateSync } from 'node:zlib';
 import { bootScene } from '../scenes/shared/tests/headless.mjs';
 
 const [scene = 'moonspire', out = `${scene}.png`, ...flags] = process.argv.slice(2);
-const WIDTH = 1440, HEIGHT = 750, SCALE = 4;
+const WIDTH = 1440, HEIGHT = 750;
+const SCALES = { moonspire: 2, pixelreef: 4 };
+const SCALE = SCALES[scene] ?? 4;
 
 const SETUPS = {
   // The wizard mid-charge at the moon, a firework opening over the valley.

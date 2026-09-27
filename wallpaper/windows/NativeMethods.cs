@@ -12,6 +12,11 @@ internal static class NativeMethods
     public const int WS_EX_LAYERED = 0x00080000;
     public const int WS_EX_TRANSPARENT = 0x00000020;
     public const int WS_EX_TOPMOST = 0x00000008;
+    // No GDI surface behind the window: only what composes into it (the WebView) is drawn,
+    // with its own transparency.
+    public const int WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
+    public const int WM_MOUSEACTIVATE = 0x0021;
+    public const int MA_NOACTIVATE = 3;
     public const int GWL_STYLE = -16;
     public const long WS_CHILD = 0x40000000;
     public const long WS_POPUP = 0x80000000;
@@ -42,6 +47,9 @@ internal static class NativeMethods
     public const uint MOD_NOREPEAT = 0x4000;
     public const uint VK_F = 0x46;
     public const uint VK_ESCAPE = 0x1B;
+
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT

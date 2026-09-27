@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createPalette, sprite, Surface, CLEAR, bayer, createParticles, createNoise } from '../pixel-engine.js';
+import { createPalette, sprite, Surface, CLEAR, bayer, createParticles, createNoise, opaqueRuns, blitRuns } from '../pixel-engine.js';
 
 const palette = createPalette({
   ink: ['#000000'],
@@ -124,6 +124,20 @@ const palette = createPalette({
     assert(v >= 0 && v <= 1);
   }
   assert(differs, 'another seed gives another field');
+}
+
+// Opaque runs: a baked layer copied along its runs matches a pixel-by-pixel blit.
+{
+  const layer = new Surface(37, 11, CLEAR);
+  layer.rect(2, 1, 30, 3, 4);
+  layer.disc(18, 7, 3, 6);
+  for (let x = 0; x < 37; x += 3) layer.pset(x, 10, 2);
+  const runs = opaqueRuns(layer);
+  const a = new Surface(37, 11, 1), b = new Surface(37, 11, 1);
+  a.blit(layer, 0, 0);
+  blitRuns(b, layer, runs);
+  assert.deepEqual(b.data, a.data, 'runs copy exactly the opaque pixels');
+  assert.equal(runs.reduce((n, v, i) => n + (i % 2 ? v : 0), 0), layer.data.filter(v => v !== CLEAR).length);
 }
 
 console.log('PASS: pixel engine palette LUTs, sprites, primitives, glow, dither, particle pool and noise');

@@ -7,6 +7,7 @@ import { createFlora } from './flora.js';
 import { createFishSchool, POPULATIONS, SPECIES } from './fish.js';
 import { createCritters } from './critters.js';
 import { createProps } from './props.js';
+import { MOODS } from '../../shared/host-controls.js';
 
 const ADDABLE = ['clown', 'blueTang', 'yellowTang', 'idol', 'flame', 'chromis'];
 const EXTRA_LIMIT = 20;
@@ -64,6 +65,14 @@ runPixelScene(({ params, isHost }) => {
       pressed: () => nightTarget === 0,
       run() { nightTarget = nightTarget ? 0 : 1; nightManual = true; },
     }],
+    accent: '#56c7ff',
+    hostControls: () => [
+      { id: 'action', kind: 'action', label: 'Feed', icon: 'feed', hint: 'Scatter a pinch of food across the tank' },
+      { id: 'touch', kind: 'tool', capture: 'overlay', label: 'Hand', icon: 'hand', hint: 'Tap to feed or poke things · drag to stir the water · hold to hand-feed' },
+      { id: 'add', kind: 'tool', capture: 'desktop', rapid: true, label: 'Add fish', icon: 'fish-plus', hint: 'Click empty desktop to add a fish there' },
+      { id: 'lights', kind: 'toggle', persist: false, label: 'Tank light', icon: 'lamp', hint: 'Off for the night reef: the corals and jellies glow', value: nightTarget === 0 },
+      { id: 'mood', kind: 'choice', label: 'Mood', icon: 'mood', hint: 'How the fish treat the pointer', value: school.mode, options: MOODS },
+    ],
     resize(W, H) {
       layout = computeLayout(W, H);
       tank.build(layout);

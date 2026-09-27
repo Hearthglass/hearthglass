@@ -5,48 +5,51 @@ using System.Windows.Forms;
 
 namespace DesktopHabitats;
 
+// A dock tool that takes the whole screen (herding fish, the wand, the hand): an invisible
+// layer over every screen's working area catches the mouse and hands it to the tool, until
+// Esc, the tool is put down in the dock, or a minute goes by untouched.
 public sealed class PlayOverlayManager : IDisposable
 {
     private readonly Func<IReadOnlyList<WallpaperWindow>> _windowsProvider;
     private readonly Action<bool> _onStateChanged;
     private readonly List<PlayOverlayForm> _overlays = new();
     private readonly System.Windows.Forms.Timer _idleTimer;
-    private readonly Func<bool> _addFishMode;
     private int _idleSeconds = 0;
     private bool _isActive = false;
 
     public bool IsActive => _isActive;
-    public bool AddFishMode => _addFishMode();
+    // The tool in hand while active.
+    public string Tool { get; private set; } = "";
     public DragGesture Drag { get; }
 
-    public PlayOverlayManager(Func<IReadOnlyList<WallpaperWindow>> windowsProvider, Action<bool> onStateChanged, Func<bool> addFishMode)
+    public PlayOverlayManager(Func<IReadOnlyList<WallpaperWindow>> windowsProvider, Action<bool> onStateChanged)
     {
         _windowsProvider = windowsProvider;
         _onStateChanged = onStateChanged;
-        _addFishMode = addFishMode;
         Drag = new DragGesture(windowsProvider);
 
         _idleTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _idleTimer.Tick += OnIdleTick;
+
+        // The overlays never take focus, so Esc is watched directly as well as through the
+        // global hotkey, which can fail if another app already owns a bare Esc.
+        _escTimer = new System.Windows.Forms.Timer { Interval = 50 };
+        _escTimer.Tick += (_, _) =>
+        {
+            if ((NativeMethods.GetAsyncKeyState((int)NativeMethods.VK_ESCAPE) & 0x8000) != 0) Exit();
+        };
     }
 
-    public void Toggle()
-    {
-        if (_isActive)
-        {
-            Exit();
-        }
-        else
-        {
-            Enter();
-        }
-    }
+    private readonly System.Windows.Forms.Timer _escTimer;
 
-    public void Enter()
+    public void Enter(string tool)
     {
-        if (_isActive) return;
+        if (_isActive && Tool == tool) return;
+        if (_isActive) Exit();
         _isActive = true;
         _idleSeconds = 0;
+        Tool = tool;
+        Drag.Tool = tool;
 
         var windows = _windowsProvider();
         foreach (var win in windows)
@@ -58,8 +61,9 @@ public sealed class PlayOverlayManager : IDisposable
         }
 
         _idleTimer.Start();
+        _escTimer.Start();
         _onStateChanged(true);
-        Logger.Info("[PlayMode] Entered Play Mode.");
+        Logger.Info($"[Overlay] Took the screen for the {tool} tool.");
     }
 
     public void Exit()
@@ -67,6 +71,7 @@ public sealed class PlayOverlayManager : IDisposable
         if (!_isActive) return;
         _isActive = false;
         _idleTimer.Stop();
+        _escTimer.Stop();
         Drag.Cancel();
 
         foreach (var overlay in _overlays)
@@ -84,7 +89,7 @@ public sealed class PlayOverlayManager : IDisposable
         }
 
         _onStateChanged(false);
-        Logger.Info("[PlayMode] Exited Play Mode.");
+        Logger.Info("[Overlay] Gave the screen back.");
     }
 
     public void ResetIdle()
@@ -98,7 +103,7 @@ public sealed class PlayOverlayManager : IDisposable
         _idleSeconds++;
         if (_idleSeconds >= 60)
         {
-            Logger.Info("[PlayMode] Exited due to 60s idle timeout.");
+            Logger.Info("[Overlay] Put the tool down after a minute untouched.");
             Exit();
         }
     }
@@ -122,6 +127,7 @@ public sealed class PlayOverlayManager : IDisposable
     {
         Exit();
         _idleTimer.Dispose();
+        _escTimer.Dispose();
     }
 }
 
@@ -129,7 +135,6 @@ internal sealed class PlayOverlayForm : Form
 {
     private readonly PlayOverlayManager _manager;
     private readonly WallpaperWindow _window;
-    private readonly PlayHintBannerForm _hintBanner;
     private readonly PlaySelectionBoxForm _selectionBox;
 
     private bool _isMouseDown = false;
@@ -147,10 +152,11 @@ internal sealed class PlayOverlayForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        Bounds = window.TargetScreen.Bounds;
+        // The working area, not the whole screen: the taskbar and tray stay usable, so there
+        // is always a way out with the mouse.
+        Bounds = window.TargetScreen.WorkingArea;
         BackColor = Color.Black;
 
-        _hintBanner = new PlayHintBannerForm(window.TargetScreen, () => manager.AddFishMode, () => window.CurrentHabitat);
         _selectionBox = new PlaySelectionBoxForm();
         // The marquee is only drawn once the tank has said the drag is a selection.
         _manager.Drag.ModeResolved += OnDragModeResolved;
@@ -199,7 +205,6 @@ internal sealed class PlayOverlayForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        _hintBanner.Show();
         _selectionBox.Show();
         _selectionBox.Hide();
     }
@@ -271,14 +276,10 @@ internal sealed class PlayOverlayForm : Form
                 _selectionBox.HideMarquee();
                 _manager.Drag.End(currentPoint);
             }
-            else if (_manager.AddFishMode)
-            {
-                targetWin.AddFishPhysical(currentPoint);
-            }
             else
             {
-                // Click on empty water without dragging clears selection
-                foreach (var win in _manager.Windows) win.ClearSelection();
+                // A click: the tool decides (herding fish, it lets go of the ones selected).
+                targetWin.UseTap(_manager.Tool, currentPoint);
             }
         }
     }
@@ -300,104 +301,10 @@ internal sealed class PlayOverlayForm : Form
             _holdTimer.Stop();
             _holdTimer.Dispose();
             _manager.Drag.ModeResolved -= OnDragModeResolved;
-            _hintBanner.Close();
-            _hintBanner.Dispose();
             _selectionBox.Close();
             _selectionBox.Dispose();
         }
         base.Dispose(disposing);
-    }
-}
-
-internal sealed class PlayHintBannerForm : Form
-{
-    private readonly Func<bool> _addFishMode;
-    private readonly Func<string> _habitat;
-    private string HintText => _habitat() switch
-    {
-        "moonspire" => "Play mode — press and hold to charge a spell (hold on the moon for a big one), right-click to cast, Esc to exit",
-        "pixelreef" => "Play mode — right-click to feed or poke, drag to stir the water, press and hold to hand-feed, Esc to exit",
-        _ => _addFishMode()
-            ? "Play mode — click to add a fish, drag to select, drag a selected fish to move them all, right-click to feed, Esc to exit"
-            : "Play mode — drag to select fish, then drag one of them to move them all, right-click to feed, Esc to exit",
-    };
-
-    public PlayHintBannerForm(Screen screen, Func<bool> addFishMode, Func<string> habitat)
-    {
-        _addFishMode = addFishMode;
-        _habitat = habitat;
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        StartPosition = FormStartPosition.Manual;
-
-        int width = 820;
-        int height = 36;
-        int x = screen.Bounds.Left + (screen.Bounds.Width - width) / 2;
-        int y = screen.Bounds.Top + 24;
-        Bounds = new Rectangle(x, y, width, height);
-
-        BackColor = Color.FromArgb(20, 24, 30);
-    }
-
-    protected override bool ShowWithoutActivation => true;
-
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            var cp = base.CreateParams;
-            cp.ExStyle |= NativeMethods.WS_EX_LAYERED
-                        | NativeMethods.WS_EX_TRANSPARENT
-                        | NativeMethods.WS_EX_TOOLWINDOW
-                        | NativeMethods.WS_EX_NOACTIVATE
-                        | NativeMethods.WS_EX_TOPMOST;
-            return cp;
-        }
-    }
-
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        // Alpha 230: sleek translucent pill
-        NativeMethods.SetLayeredWindowAttributes(Handle, 0, 230, NativeMethods.LWA_ALPHA);
-        NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
-            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-
-        var rect = new Rectangle(0, 0, Width - 1, Height - 1);
-        using var path = GetRoundedRectanglePath(rect, 16);
-        using var fillBrush = new SolidBrush(Color.FromArgb(28, 34, 44));
-        e.Graphics.FillPath(fillBrush, path);
-
-        using var borderPen = new Pen(Color.FromArgb(80, 255, 255, 255), 1);
-        e.Graphics.DrawPath(borderPen, path);
-
-        using var font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
-        using var textBrush = new SolidBrush(Color.FromArgb(235, 240, 245));
-        using var sf = new StringFormat
-        {
-            Alignment = StringAlignment.Center,
-            LineAlignment = StringAlignment.Center
-        };
-
-        e.Graphics.DrawString(HintText, font, textBrush, rect, sf);
-    }
-
-    private static GraphicsPath GetRoundedRectanglePath(Rectangle rect, int radius)
-    {
-        var path = new GraphicsPath();
-        int d = radius * 2;
-        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
-        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
-        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
-        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 }
 

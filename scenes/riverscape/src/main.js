@@ -1,5 +1,6 @@
 import { qualityName, frameRate } from '../../shared/render-policy.js';
 import { installControls, reportSceneError, preferredQuality, pointerTools } from '../../shared/controls.js';
+import { installFishControls } from '../../shared/host-controls.js';
 import { createComposite } from './composite.js';
 import * as THREE from "three";
 import { createEnvironment, createParticles } from "./environment.js";
@@ -207,6 +208,18 @@ async function start() {
   changePlayMode = (active) => { fish.setPlayMode(active); };
   changeHerd = (state) => { fish.setHerd(state); };
   fish.setMode(currentMode);
+  // The wallpaper dock's buttons. A click on the desktop with "Click to feed" picked is
+  // the same as a click on the water.
+  installFishControls({
+    accent: "#8fd6a8",
+    feed: () => window.habitatFeed(),
+    dropAt: (x, y) => window.habitatClick?.(x, y),
+    addFish: (x, y) => window.habitatAddFish(x, y),
+    drag: (gesture) => window.habitatDrag(gesture),
+    clearSelection: () => fish.setSelection("clear"),
+    mode: () => currentMode,
+    setMode: (mode) => window.habitatMode(mode),
+  });
   const particles = createParticles(scene, { thickets: plants.thickets });
 
   const { target, post, postScene, postCamera } = createComposite(camera, settings);

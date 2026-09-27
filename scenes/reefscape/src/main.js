@@ -1,5 +1,6 @@
 import { QUALITY_PRESETS as presets, qualityName, frameRate, framebufferSize, renderScale } from '../../shared/render-policy.js';
 import { installControls, reportSceneError, preferredQuality, pointerTools } from '../../shared/controls.js';
+import { installFishControls } from '../../shared/host-controls.js';
 import { createGpuScaler } from '../../shared/gpu-scaler.js';
 import { createComposite } from './composite.js';
 import * as THREE from 'three';
@@ -198,6 +199,10 @@ async function start(){
   feed=()=>{if(running())simulation.feed(-2.6+Math.sin(simulation.time*.73)*1.7,1.3);};
   addFish=(x,y,kind)=>Boolean(running()&&simulation.addFish(x,y,kind));
   drag=gesture=>running()?simulation.drag(gesture):'none';
+  // The wallpaper dock's buttons; a desktop click with "Click to feed" is a click on the water.
+  installFishControls({accent:'#5fd0e6',feed:()=>feed(),dropAt:(x,y)=>window.habitatClick?.(x,y),
+    addFish:(x,y)=>addFish(x,y),drag:gesture=>drag(gesture),clearSelection:()=>changeSelection('clear'),
+    mode:()=>currentMode,setMode:mode=>window.habitatMode(mode)});
   let pointerTool={id:'feed'};
   updateControls=installControls({habitat,isPaused:()=>paused,isRunning:running,
     pause:window.habitatPause,feed,quality:()=>quality,
