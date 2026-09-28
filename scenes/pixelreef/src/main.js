@@ -177,15 +177,15 @@ runPixelScene(({ params, isHost }) => {
         }
         return true;
       }
-      if (props.hitChest(x, y)) { if (props.openChest() === 'open') sparkle(props.chest.x, props.chest.y - 12, 16); return true; }
-      if (props.hitCastle(x, y)) { props.castleBurst(); return true; }
+      if (critters.hitSeahorse(x, y)) { critters.pokeSeahorse(); return true; }
+      if (critters.hitCrab(x, y)) { critters.pokeCrab(); sandPuff(critters.crab.x, critters.crab.y, 8); return true; }
       if (critters.hitCave(x, y)) {
         const r = critters.pokeOcto();
         if (r === 'ink') inkCloud(critters.octo.x, critters.octo.y - 6);
         return true;
       }
-      if (critters.hitCrab(x, y)) { critters.pokeCrab(); sandPuff(critters.crab.x, critters.crab.y, 8); return true; }
-      if (critters.hitSeahorse(x, y)) { critters.pokeSeahorse(); return true; }
+      if (props.hitChest(x, y)) { if (props.openChest() === 'open') sparkle(props.chest.x, props.chest.y - 12, 16); return true; }
+      if (props.hitCastle(x, y)) { props.castleBurst(); return true; }
       if (flora.containsAnemone(x, y)) {
         flora.touchAnemone(x, y);
         for (const fish of school.fish) if (fish.kind === 'clown') school.startle(fish);

@@ -27,6 +27,15 @@ const D = scene.debug;
 const L = D.layout;
 const fish = D.school.fish;
 const count = kind => fish.filter(f => f.kind === kind).length;
+// Taps hit whatever is drawn in front, so before tapping a prop or critter, move any fish,
+// jellyfish, crab or seahorse that has wandered over the spot out of the way.
+const clearFor = (x, y) => {
+  const { crab, seahorse, jellies } = D.critters;
+  for (const f of [...fish, ...jellies, seahorse]) {
+    if (Math.abs(f.x - x) < 24 && Math.abs(f.y - y) < 24) f.y = L.surfaceY + 4;
+  }
+  if (Math.abs(crab.x - x) < 24) crab.x = x < L.W / 2 ? crab.max : crab.min;
+};
 
 // Stocked to the normal population, everything in the water.
 {
@@ -92,6 +101,7 @@ const count = kind => fish.filter(f => f.kind === kind).length;
 // The chest opens, spills coins onto the sand, and shuts itself.
 {
   const chest = D.props.chest;
+  clearFor(chest.x, chest.y - 6);
   app.hostClick(chest.x, chest.y - 6);
   app.seconds(0.5);
   assert(chest.open > 0.9);
@@ -106,11 +116,13 @@ const count = kind => fish.filter(f => f.kind === kind).length;
 {
   const octo = D.critters.octo;
   const cave = L.cave;
+  clearFor(cave.x, cave.y);
   app.hostClick(cave.x, cave.y);
   app.seconds(1.5);
   assert.equal(octo.state, 'out');
   assert(octo.out > 0.9);
   const inkBefore = D.particles.count;
+  clearFor(cave.x, cave.y - 4);
   app.hostClick(cave.x, cave.y - 4);
   assert.equal(octo.state, 'inking');
   assert(D.particles.count > inkBefore + 100, 'a cloud of ink');
@@ -121,7 +133,11 @@ const count = kind => fish.filter(f => f.kind === kind).length;
 // The crab raises its claws and scuttles; a jellyfish jumps when poked.
 {
   const crab = D.critters.crab;
-  app.hostClick(crab.x, crab.y - 3);
+  const { x, y } = crab;
+  crab.x = -1e3;
+  clearFor(x, y - 3);
+  crab.x = x;
+  app.hostClick(x, y - 3);
   assert.equal(crab.state, 'claws');
   app.seconds(1);
   assert.equal(crab.state, 'scuttle');
@@ -186,6 +202,7 @@ const count = kind => fish.filter(f => f.kind === kind).length;
 // Drag in the host: stirs the water, and answers so no marquee is drawn over the tank.
 {
   const y = (L.surfaceY + L.floorY) / 2;
+  clearFor(40, y);
   assert.equal(app.hostDrag('start', 40, y, 50, y), 'herd');
   for (let k = 0; k < 10; k++) { app.hostDrag('move', 40, y, 50 + k * 8, y); app.seconds(1 / 30); }
   assert(D.props.currents.some(c => c.alive));
