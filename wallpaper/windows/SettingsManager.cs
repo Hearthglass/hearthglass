@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.Win32;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 public class AppSettings
 {
@@ -27,10 +27,10 @@ public static class SettingsManager
 {
     private static readonly string AppDataFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DesktopHabitats");
+        "Hearthglass");
     private static readonly string SettingsFile = Path.Combine(AppDataFolder, "settings.json");
     private const string RegistryRunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string AppName = "DesktopHabitats";
+    private const string AppName = "Hearthglass";
 
     public static AppSettings Load()
     {

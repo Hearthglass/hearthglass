@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 public static class OcclusionDetector
 {

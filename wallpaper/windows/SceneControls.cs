@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 // What the scene on screen offers the control dock, as it answered window.habitatControls()
 // (see scenes/shared/host-controls.js). The host only needs to know each control's kind,

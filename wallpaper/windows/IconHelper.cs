@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 public static class IconHelper
 {

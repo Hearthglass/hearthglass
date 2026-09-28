@@ -4,7 +4,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 public class WallpaperWindow : Form
 {
@@ -67,7 +67,7 @@ public class WallpaperWindow : Form
     {
         var userDataFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DesktopHabitats",
+            "Hearthglass",
             "WebView2Data");
 
         var env = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
@@ -79,7 +79,7 @@ public class WallpaperWindow : Form
 
         // Map virtual domain to local scenes directory
         _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-            "desktop-habitats.local",
+            "hearthglass.local",
             _assetsRoot,
             CoreWebView2HostResourceAccessKind.Allow);
 
@@ -193,7 +193,7 @@ public class WallpaperWindow : Form
         _controlsReady = false;
         // The scene stocks its tank and picks its render budget from the URL when it is built.
         var page = $"/scenes/{_habitat}/wallpaper.html?population={Uri.EscapeDataString(_population)}&quality={Uri.EscapeDataString(_quality)}";
-        _webView.CoreWebView2.Navigate($"https://desktop-habitats.local{page}");
+        _webView.CoreWebView2.Navigate($"https://hearthglass.local{page}");
     }
 
     public void SetHabitat(string habitat)

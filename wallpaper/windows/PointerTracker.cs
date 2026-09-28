@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 public class PointerTracker : IDisposable
 {

@@ -1,8 +1,10 @@
-# Desktop Habitats
+# Hearthglass
 
-[![Desktop Habitats aquarium demo](docs/images/demo.gif)](docs/videos/demo.mp4)
+[![Hearthglass aquarium demo](docs/images/demo.gif)](docs/videos/demo.mp4)
 
 Have you always wanted an aquarium? Now you can have it, right on your desktop :)
+
+Based on [Desktop Habitats](https://github.com/chaseleantj/desktop-habitats) by Chase Lean.
 
 The fish react to your cursor and compete for food, while the plants sway in a slow current. There are four environments: two 3D aquariums, **Riverscape**, a planted freshwater tank, and **Reefscape**, a saltwater tank; and two pixel-art scenes, **Moonspire**, a wizard atop his moonlit observatory, and **Pixel Reef**, a hand-pixelled reef tank.
 
@@ -45,19 +47,24 @@ Wait for that installation to finish. Download and unzip this repository, or clo
 sh wallpaper/install.sh
 ```
 
-The script builds the app for your Mac, installs it at `~/Applications/Desktop Habitats.app`, and starts it. It also adds a login item so the aquarium starts when you sign in. Allow about 20 seconds for the first frame to appear.
+The script builds the app for your Mac, installs it at `~/Applications/Hearthglass.app`, and starts it. It also adds a login item so the aquarium starts when you sign in. Allow about 20 seconds for the first frame to appear.
 
 During installation, macOS may ask whether Terminal can control System Events. This lets the installer set a still image of the aquarium as your desktop picture, underneath the animation. You can decline; the live wallpaper will still work.
 
 ## Install on Windows
 
-You need Windows 10 or Windows 11 and the [.NET 8 SDK](https://dotnet.microsoft.com/download) (or run with pre-installed .NET 8 Desktop Runtime).
+You need Windows 10 or Windows 11.
 
-### Quick Install (Double-Click)
-Simply **double-click [`Install.cmd`](Install.cmd)** in the project folder.
+### Download (recommended)
 
-### Command Line
-Or run in PowerShell / Terminal:
+1. Download **[Hearthglass-win-x64.zip](https://github.com/hearthglass/hearthglass/releases/latest/download/Hearthglass-win-x64.zip)** from the [latest release](https://github.com/hearthglass/hearthglass/releases/latest).
+2. Unzip it anywhere, open the `Hearthglass` folder and double-click **`Install.cmd`**.
+
+Nothing else needs installing; .NET comes bundled. Windows may show "Windows protected your PC" because the app is not code-signed: choose **More info**, then **Run anyway**.
+
+### Build from source
+
+You need the [.NET 8 SDK](https://dotnet.microsoft.com/download). Clone or download this repository, then double-click [`Install.cmd`](Install.cmd) in the project folder, or run in PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File wallpaper/install.ps1
@@ -69,12 +76,11 @@ Or with npm:
 npm run wallpaper:win
 ```
 
-The script builds Desktop Habitats, installs it to `%LOCALAPPDATA%\Programs\DesktopHabitats`, adds a shortcut to your Start Menu and Startup folder, and starts the aquarium immediately.
+Either way, Hearthglass installs to `%LOCALAPPDATA%\Programs\Hearthglass`, adds shortcuts to your Start Menu, desktop and Startup folder, and starts straight away. If you had it installed under its earlier name, Desktop Habitats, the installer replaces that copy and keeps your settings.
 
 ### Uninstall
-- **Double-click [`Uninstall.cmd`](Uninstall.cmd)** in the project folder
-- Or open the Windows Start Menu and select **Uninstall Desktop Habitats**
-- Or run `npm run unwallpaper:win` in PowerShell
+- Open the Windows Start Menu and select **Uninstall Hearthglass**
+- Or double-click [`Uninstall.cmd`](Uninstall.cmd) in the project folder, or run `npm run unwallpaper:win`
 
 ## Use the wallpaper
 
@@ -149,7 +155,9 @@ No. The installed app has its own copy of the scene and runs independently. You 
 
 ### How do I update it?
 
-Download or pull the latest source, then rerun `sh wallpaper/install.sh` from the project folder. Editing the source alone does not update the installed app. If you installed the earlier Aquatica version, the installer removes its app and login item before starting Desktop Habitats. Its old still image and saved preference are left behind; the new app starts with its own preference.
+On Windows, download the zip from the [latest release](https://github.com/hearthglass/hearthglass/releases/latest) and run its `Install.cmd` again; your settings are kept.
+
+On macOS, download or pull the latest source, then rerun `sh wallpaper/install.sh` from the project folder. Editing the source alone does not update the installed app. If you installed an earlier version under the name Aquatica or Desktop Habitats, the installer removes its app and login item before starting Hearthglass. Its old still image and saved preference are left behind; the new app starts with its own preference.
 
 ### How do I remove it and get my old wallpaper back?
 
@@ -161,7 +169,7 @@ sh wallpaper/uninstall.sh
 
 Or use `npm run unwallpaper`. This stops the app, removes its login item and deletes the installed app.
 
-The still image at `~/Pictures/Desktop Habitats.png` stays behind, along with the desktop picture setting. Choose your previous wallpaper in System Settings, then delete the image if you no longer want it. The saved pause and environment preferences are also retained.
+The still image at `~/Pictures/Hearthglass.png` stays behind, along with the desktop picture setting. Choose your previous wallpaper in System Settings, then delete the image if you no longer want it. The saved pause and environment preferences are also retained.
 
 ## Try it in a browser
 
@@ -185,6 +193,6 @@ Reduce Motion starts the preview paused. Serve the page over HTTP; opening `inde
 
 ## Credits and license
 
-Desktop Habitats is [MIT licensed](LICENSE). Three.js 0.180.0 is bundled under its [MIT license](vendor/THREE-LICENSE.txt).
+Hearthglass is [MIT licensed](LICENSE). Three.js 0.180.0 is bundled under its [MIT license](vendor/THREE-LICENSE.txt).
 
 The rock, wood and sand textures come from Poly Haven under [CC0](https://polyhaven.com/license): [Rock Boulder Dry](https://polyhaven.com/a/rock_boulder_dry), [Rough Wood](https://polyhaven.com/a/rough_wood) and [Sand 01](https://polyhaven.com/a/sand_01). Reefscape's rock mesh, pore maps, coral texture and organism meshes are procedural, generated by the scripts in `tools/`. The pixel scenes' art is drawn by their own code; `node tools/pixel-snapshot.mjs moonspire docs/images/moonspire-wide.png` (or `pixelreef`) renders their gallery stills without a browser.

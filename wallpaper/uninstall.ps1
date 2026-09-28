@@ -1,10 +1,10 @@
-# Desktop Habitats Windows Uninstaller
+# Hearthglass Windows Uninstaller
 # Stops the wallpaper agent and removes installed files and shortcuts.
 
 $ErrorActionPreference = "Continue"
 
-$appName = "Desktop Habitats"
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\DesktopHabitats"
+$appName = "Hearthglass"
+$installDir = Join-Path $env:LOCALAPPDATA "Programs\Hearthglass"
 $startupDir = [Environment]::GetFolderPath("Startup")
 $startMenuDir = [Environment]::GetFolderPath("Programs")
 $shortcutName = "$appName.lnk"
@@ -12,9 +12,9 @@ $shortcutName = "$appName.lnk"
 Write-Host "Uninstalling $appName..." -ForegroundColor Cyan
 
 # 1. Stop running instance
-$runningProcesses = Get-Process -Name "DesktopHabitats" -ErrorAction SilentlyContinue
+$runningProcesses = Get-Process -Name "Hearthglass" -ErrorAction SilentlyContinue
 if ($runningProcesses) {
-    Write-Host "Stopping Desktop Habitats..." -ForegroundColor Yellow
+    Write-Host "Stopping Hearthglass..." -ForegroundColor Yellow
     $runningProcesses | Stop-Process -Force
     Start-Sleep -Seconds 1
 }
@@ -26,7 +26,7 @@ if (Test-Path $startMenuShortcut) {
     Write-Host "Removed Start Menu shortcut." -ForegroundColor Green
 }
 
-$uninstallShortcut = Join-Path $startMenuDir "Uninstall Desktop Habitats.lnk"
+$uninstallShortcut = Join-Path $startMenuDir "Uninstall Hearthglass.lnk"
 if (Test-Path $uninstallShortcut) {
     Remove-Item $uninstallShortcut -Force
     Write-Host "Removed Uninstall shortcut." -ForegroundColor Green
@@ -45,9 +45,9 @@ if (Test-Path $startupShortcut) {
 
 # 3. Clean up registry Run entry if any
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$entry = Get-ItemProperty -Path $runKey -Name "DesktopHabitats" -ErrorAction SilentlyContinue
+$entry = Get-ItemProperty -Path $runKey -Name "Hearthglass" -ErrorAction SilentlyContinue
 if ($entry) {
-    Remove-ItemProperty -Path $runKey -Name "DesktopHabitats" -Force
+    Remove-ItemProperty -Path $runKey -Name "Hearthglass" -Force
 }
 
 # 4. Remove installation files
@@ -63,4 +63,4 @@ if (Test-Path $installDir) {
     }
 }
 
-Write-Host "Desktop Habitats uninstalled." -ForegroundColor Cyan
+Write-Host "Hearthglass uninstalled." -ForegroundColor Cyan

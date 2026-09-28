@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 // The control dock: ui/dock.html in a small transparent window, always on top, that never
 // takes focus, at the bottom (or top) centre of the main screen's working area. The page
@@ -69,7 +69,7 @@ public sealed class DockWindow : Form
     public async Task InitializeAsync()
     {
         var userDataFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopHabitats", "WebView2Data");
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Hearthglass", "WebView2Data");
         var env = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
         await _webView.EnsureCoreWebView2Async(env);
         var core = _webView.CoreWebView2;
@@ -78,9 +78,9 @@ public sealed class DockWindow : Form
         core.Settings.AreDefaultContextMenusEnabled = false;
         core.Settings.IsZoomControlEnabled = false;
         core.Settings.AreBrowserAcceleratorKeysEnabled = false;
-        core.SetVirtualHostNameToFolderMapping("desktop-habitats.local", _assetsRoot, CoreWebView2HostResourceAccessKind.Allow);
+        core.SetVirtualHostNameToFolderMapping("hearthglass.local", _assetsRoot, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += OnWebMessage;
-        core.Navigate("https://desktop-habitats.local/ui/dock.html");
+        core.Navigate("https://hearthglass.local/ui/dock.html");
     }
 
     private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs args)

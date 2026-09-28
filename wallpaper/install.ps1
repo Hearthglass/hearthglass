@@ -1,6 +1,7 @@
-# Desktop Habitats Windows Installer
-# Builds the wallpaper agent, installs it to %LOCALAPPDATA%\Programs\DesktopHabitats
-# with its own copy of the aquarium, and starts it now and at every login.
+# Hearthglass Windows Installer
+# Builds the wallpaper agent (or, from a release zip, takes the prebuilt one), installs it
+# to %LOCALAPPDATA%\Programs\Hearthglass with its own copy of the scenes, and starts it
+# now and at every login.
 param(
     [switch]$NoStartup = $false
 )
@@ -8,9 +9,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$project = Split-Path -Parent $here
-$appName = "Desktop Habitats"
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\DesktopHabitats"
+# A release zip has the built app next to this script; a source checkout keeps this
+# script in wallpaper\ and builds the app.
+$prebuilt = Test-Path (Join-Path $here "Hearthglass.exe")
+$project = if ($prebuilt) { $here } else { Split-Path -Parent $here }
+$appName = "Hearthglass"
+$installDir = Join-Path $env:LOCALAPPDATA "Programs\Hearthglass"
 $startupDir = [Environment]::GetFolderPath("Startup")
 $startMenuDir = [Environment]::GetFolderPath("Programs")
 $shortcutName = "$appName.lnk"
@@ -18,26 +22,56 @@ $shortcutName = "$appName.lnk"
 Write-Host "Installing $appName..." -ForegroundColor Cyan
 
 # 1. Check for dotnet SDK
-if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
-    Write-Error "The .NET 8 SDK is required to build Desktop Habitats. Please install it from https://dotnet.microsoft.com/download"
+if (-not $prebuilt -and -not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
+    Write-Error "The .NET 8 SDK is required to build Hearthglass. Please install it from https://dotnet.microsoft.com/download"
     exit 1
 }
 
 # 2. Stop any existing running instance
-$runningProcesses = Get-Process -Name "DesktopHabitats" -ErrorAction SilentlyContinue
+$runningProcesses = Get-Process -Name "Hearthglass" -ErrorAction SilentlyContinue
 if ($runningProcesses) {
     Write-Host "Stopping running instance..." -ForegroundColor Yellow
     $runningProcesses | Stop-Process -Force
     Start-Sleep -Seconds 1
 }
 
-# 3. Publish application
-$csproj = Join-Path $here "windows\DesktopHabitats.csproj"
-Write-Host "Building Desktop Habitats..." -ForegroundColor Cyan
-dotnet publish $csproj -c Release -o $installDir --nologo -v q
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Build failed with exit code $LASTEXITCODE"
-    exit $LASTEXITCODE
+# Replace an installation made before the project was renamed from Desktop Habitats,
+# carrying its saved settings over.
+Get-Process -Name "DesktopHabitats" -ErrorAction SilentlyContinue | Stop-Process -Force
+$oldData = Join-Path $env:LOCALAPPDATA "DesktopHabitats"
+$newData = Join-Path $env:LOCALAPPDATA "Hearthglass"
+$oldSettings = Join-Path $oldData "settings.json"
+if ((Test-Path $oldSettings) -and -not (Test-Path (Join-Path $newData "settings.json"))) {
+    New-Item -ItemType Directory -Force $newData | Out-Null
+    Copy-Item $oldSettings $newData
+}
+foreach ($old in @(
+    (Join-Path $env:LOCALAPPDATA "Programs\DesktopHabitats"),
+    $oldData,
+    (Join-Path $startMenuDir "Desktop Habitats.lnk"),
+    (Join-Path $startMenuDir "Uninstall Desktop Habitats.lnk"),
+    (Join-Path $startupDir "Desktop Habitats.lnk"),
+    (Join-Path ([Environment]::GetFolderPath("Desktop")) "Desktop Habitats.lnk"))) {
+    if (Test-Path $old) { Remove-Item $old -Recurse -Force -ErrorAction SilentlyContinue }
+}
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "DesktopHabitats" -ErrorAction SilentlyContinue
+
+# 3. Publish application, or copy the prebuilt one
+if ($prebuilt) {
+    if ((Resolve-Path $here).Path -ne [IO.Path]::GetFullPath($installDir)) {
+        Write-Host "Copying Hearthglass..." -ForegroundColor Cyan
+        New-Item -ItemType Directory -Force $installDir | Out-Null
+        Get-ChildItem $here | Where-Object { $_.Name -notin @("scenes", "vendor", "ui") } |
+            Copy-Item -Destination $installDir -Recurse -Force
+    }
+} else {
+    $csproj = Join-Path $here "windows\Hearthglass.csproj"
+    Write-Host "Building Hearthglass..." -ForegroundColor Cyan
+    dotnet publish $csproj -c Release -o $installDir --nologo -v q
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Build failed with exit code $LASTEXITCODE"
+        exit $LASTEXITCODE
+    }
 }
 
 # 4. Copy scenes, vendor, and ui assets
@@ -46,7 +80,7 @@ $assetsToCopy = @("scenes", "vendor", "ui")
 foreach ($asset in $assetsToCopy) {
     $src = Join-Path $project $asset
     $dst = Join-Path $installDir $asset
-    if (Test-Path $src) {
+    if ((Test-Path $src) -and ((Resolve-Path $src).Path -ne [IO.Path]::GetFullPath($dst))) {
         if (Test-Path $dst) {
             Remove-Item $dst -Recurse -Force
         }
@@ -59,26 +93,28 @@ Get-ChildItem -Path (Join-Path $installDir "scenes") -Filter "tests" -Directory 
     Remove-Item $_.FullName -Recurse -Force
 }
 
-# 5. Copy uninstaller scripts into installation directory
-Copy-Item (Join-Path $project "Uninstall.cmd") -Destination (Join-Path $installDir "Uninstall.cmd") -Force
-Copy-Item (Join-Path $here "uninstall.ps1") -Destination (Join-Path $installDir "uninstall.ps1") -Force
+# 5. Copy uninstaller scripts into installation directory (a release zip's are copied above)
+if (-not $prebuilt) {
+    Copy-Item (Join-Path $project "Uninstall.cmd") -Destination (Join-Path $installDir "Uninstall.cmd") -Force
+    Copy-Item (Join-Path $here "uninstall.ps1") -Destination (Join-Path $installDir "uninstall.ps1") -Force
+}
 
 # 6. Create Start Menu shortcuts
-$exePath = Join-Path $installDir "DesktopHabitats.exe"
+$exePath = Join-Path $installDir "Hearthglass.exe"
 $wshShell = New-Object -ComObject WScript.Shell
 
 $startMenuShortcut = Join-Path $startMenuDir $shortcutName
 $shortcut = $wshShell.CreateShortcut($startMenuShortcut)
 $shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $installDir
-$shortcut.Description = "Desktop Habitats - Living aquarium on your desktop"
+$shortcut.Description = "Hearthglass - Living aquarium on your desktop"
 $shortcut.Save()
 
-$uninstallShortcutPath = Join-Path $startMenuDir "Uninstall Desktop Habitats.lnk"
+$uninstallShortcutPath = Join-Path $startMenuDir "Uninstall Hearthglass.lnk"
 $uShortcut = $wshShell.CreateShortcut($uninstallShortcutPath)
 $uShortcut.TargetPath = Join-Path $installDir "Uninstall.cmd"
 $uShortcut.WorkingDirectory = $installDir
-$uShortcut.Description = "Uninstall Desktop Habitats"
+$uShortcut.Description = "Uninstall Hearthglass"
 $uShortcut.Save()
 
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) $shortcutName
@@ -86,7 +122,7 @@ $dShortcut = $wshShell.CreateShortcut($desktopShortcut)
 $dShortcut.TargetPath = $exePath
 $dShortcut.WorkingDirectory = $installDir
 $dShortcut.IconLocation = "$exePath,0"
-$dShortcut.Description = "Start Desktop Habitats"
+$dShortcut.Description = "Start Hearthglass"
 $dShortcut.Save()
 
 # 7. Create Startup shortcut unless -NoStartup was passed
@@ -95,13 +131,13 @@ if (-not $NoStartup) {
     $shortcut = $wshShell.CreateShortcut($startupShortcut)
     $shortcut.TargetPath = $exePath
     $shortcut.WorkingDirectory = $installDir
-    $shortcut.Description = "Desktop Habitats"
+    $shortcut.Description = "Hearthglass"
     $shortcut.Save()
     Write-Host "Configured to start at login." -ForegroundColor Green
 }
 
 # 7. Start the application
-Write-Host "Starting Desktop Habitats..." -ForegroundColor Green
+Write-Host "Starting Hearthglass..." -ForegroundColor Green
 $startInfo = New-Object System.Diagnostics.ProcessStartInfo
 $startInfo.FileName = $exePath
 $startInfo.WorkingDirectory = $installDir
@@ -110,7 +146,7 @@ $startInfo.UseShellExecute = $true
 
 Write-Host @"
 
-Desktop Habitats installed successfully!
+Hearthglass installed successfully!
   Location: $installDir
   Executable: $exePath
 

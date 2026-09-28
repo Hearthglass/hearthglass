@@ -9,8 +9,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>fish.ico</ApplicationIcon>
-    <AssemblyName>DesktopHabitats</AssemblyName>
-    <RootNamespace>DesktopHabitats</RootNamespace>
+    <AssemblyName>Hearthglass</AssemblyName>
+    <RootNamespace>Hearthglass</RootNamespace>
     <LangVersion>latest</LangVersion>
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
   </PropertyGroup>

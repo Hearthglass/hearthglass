@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 // The scenes the app can show, each a directory under scenes/ with a wallpaper.html, the
 // colour the window shows before the page has drawn, matched to each scene's own dark, and

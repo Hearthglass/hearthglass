@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 // A dock tool that takes the whole screen (herding fish, the wand, the hand): an invisible
 // layer over every screen's working area catches the mouse and hands it to the tool, until

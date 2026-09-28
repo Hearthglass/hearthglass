@@ -1,0 +1,29 @@
+# Runs the scene checks and tests, and makes sure the Windows app still compiles, on
+# every push to main and every pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scenes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run check
+      - run: npm test
+
+  windows-build:
+    # The Windows app compiles on Linux too, which is quicker and cheaper than a Windows runner.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet build wallpaper/windows/Hearthglass.csproj -c Release -p:EnableWindowsTargeting=true

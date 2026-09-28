@@ -1,0 +1,30 @@
+# Pushing a version tag (git tag v1.2.0 && git push origin v1.2.0) builds the Windows
+# zip and publishes a GitHub Release with it attached and notes generated from the
+# commits and pull requests since the previous tag.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build the release zip
+        shell: pwsh
+        run: ./tools/package-windows.ps1
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/Hearthglass-win-x64.zip --verify-tag --generate-notes --title "Hearthglass ${{ github.ref_name }}"

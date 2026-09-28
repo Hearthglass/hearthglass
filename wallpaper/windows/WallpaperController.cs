@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Win32;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 public class WallpaperController : ApplicationContext
 {
@@ -116,7 +116,7 @@ public class WallpaperController : ApplicationContext
         _trayIcon = new NotifyIcon
         {
             Icon = IconHelper.CreateFishIcon(),
-            Text = $"Desktop Habitats · {FormatTitle(_settings.Habitat)}",
+            Text = $"Hearthglass · {FormatTitle(_settings.Habitat)}",
             ContextMenuStrip = contextMenu,
             Visible = true
         };
@@ -172,7 +172,7 @@ public class WallpaperController : ApplicationContext
         {
             AppDomain.CurrentDomain.BaseDirectory,
             Directory.GetCurrentDirectory(),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "DesktopHabitats")
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Hearthglass")
         };
 
         // Also check upwards from BaseDirectory
@@ -191,7 +191,7 @@ public class WallpaperController : ApplicationContext
             }
         }
 
-        throw new DirectoryNotFoundException("Could not locate Desktop Habitats scene assets folder.");
+        throw new DirectoryNotFoundException("Could not locate Hearthglass scene assets folder.");
     }
 
     private async Task BuildWindowsAsync()
@@ -307,7 +307,7 @@ public class WallpaperController : ApplicationContext
         _pauseItem.Text = _settings.Paused ? "Resume" : "Pause";
         _dockItem.Checked = _settings.DockEnabled;
         foreach (var (level, item) in _qualityItems) item.Checked = _settings.Quality == level;
-        _trayIcon.Text = $"Desktop Habitats · {FormatTitle(_settings.Habitat)}";
+        _trayIcon.Text = $"Hearthglass · {FormatTitle(_settings.Habitat)}";
     }
 
     private void SelectHabitat(string habitat)
@@ -742,7 +742,7 @@ public class WallpaperController : ApplicationContext
         Logger.Info("[Controller] Launched again while running; opening the dock.");
         if (_settings.Paused) TogglePause();
         if (!_dockPinned) ToggleDockPinned();
-        _trayIcon.ShowBalloonTip(4000, "Desktop Habitats is running",
+        _trayIcon.ShowBalloonTip(4000, "Hearthglass is running",
             "The dock at the edge of the screen has the scene's controls. Click the fish in the tray to open or close it.", ToolTipIcon.Info);
     }
 

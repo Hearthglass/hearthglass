@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 // One drag with a dock tool. The scene under the press decides what the drag is for: for
 // the fish, begun on the ones held selected it picks them up and carries them ("herd"),

@@ -1,14 +1,18 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Desktop Habitats Installer
+title Hearthglass Installer
 
 echo =======================================================
-echo          Desktop Habitats - Windows Installer
+echo          Hearthglass - Windows Installer
 echo =======================================================
 echo.
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0wallpaper\install.ps1"
+rem In a source checkout the script is in wallpaper\; in a release zip or the
+rem installed folder it sits next to this file.
+set "SCRIPT=%~dp0wallpaper\install.ps1"
+if not exist "%SCRIPT%" set "SCRIPT=%~dp0install.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%"
 set EXITCODE=%ERRORLEVEL%
 
 echo.

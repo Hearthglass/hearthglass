@@ -14,7 +14,7 @@ import Cocoa
 import WebKit
 import IOKit.ps
 
-let sceneScheme = "desktop-habitats"
+let sceneScheme = "hearthglass"
 let sceneHost = "local"
 
 /// The scenes the app can show, each a directory under scenes/ with a wallpaper.html.
@@ -89,7 +89,7 @@ final class Reporter: NSObject, WKScriptMessageHandler {
   func userContentController(
     _ controller: WKUserContentController, didReceive message: WKScriptMessage
   ) {
-    NSLog("desktop-habitats page: \(message.body)")
+    NSLog("hearthglass page: \(message.body)")
   }
 }
 
@@ -209,7 +209,7 @@ final class Wallpaper: NSObject, WKNavigationDelegate {
       if loaded { view.evaluateJavaScript("habitatPointerOut()") }
       inside = false
     }
-    NSLog("desktop-habitats: \(rate) fps")
+    NSLog("hearthglass: \(rate) fps")
     send()
     return true
   }
@@ -260,7 +260,7 @@ final class Wallpaper: NSObject, WKNavigationDelegate {
     _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
     withError error: Error
   ) {
-    NSLog("desktop-habitats: the scene did not load: \(error.localizedDescription)")
+    NSLog("hearthglass: the scene did not load: \(error.localizedDescription)")
   }
 
   /// What the page thinks it is doing, for the log.
@@ -281,7 +281,7 @@ final class Wallpaper: NSObject, WKNavigationDelegate {
       })()
       """
     ) { value, error in
-      NSLog("desktop-habitats page state: \(value ?? error?.localizedDescription ?? "unreadable")")
+      NSLog("hearthglass page state: \(value ?? error?.localizedDescription ?? "unreadable")")
     }
   }
 
@@ -294,7 +294,7 @@ final class Wallpaper: NSObject, WKNavigationDelegate {
         let png = NSBitmapImageRep(data: data)?.representation(using: .png, properties: [:])
       else { return }
       try? png.write(to: file)
-      NSLog("desktop-habitats: wrote \(file.path)")
+      NSLog("hearthglass: wrote \(file.path)")
     }
   }
 }
@@ -387,7 +387,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
       CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
     }
 
-    // `kill -USR1` writes what the first screen is showing to /tmp/desktop-habitats.png.
+    // `kill -USR1` writes what the first screen is showing to /tmp/hearthglass.png.
     signal(SIGUSR1, SIG_IGN)
     snapshots = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
     snapshots?.setEventHandler { [weak self] in self?.snapshot() }
@@ -400,7 +400,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     for screen in screens { screen.setRate(60) }
     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
       first.probe()
-      first.snapshot(to: URL(fileURLWithPath: "/tmp/desktop-habitats.png")) {
+      first.snapshot(to: URL(fileURLWithPath: "/tmp/hearthglass.png")) {
         self?.applyRate()
       }
     }
@@ -521,11 +521,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
   /// The agent's only visible piece: a fish in the menu bar that can stop the water.
   private func addMenu() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    let symbol = NSImage(systemSymbolName: "fish", accessibilityDescription: "Desktop Habitats")
+    let symbol = NSImage(systemSymbolName: "fish", accessibilityDescription: "Hearthglass")
     symbol?.isTemplate = true
     item.button?.image = symbol
-    if symbol == nil { item.button?.title = "Desktop Habitats" }
-    item.button?.toolTip = "Desktop Habitats · \(habitat.title)"
+    if symbol == nil { item.button?.title = "Hearthglass" }
+    item.button?.toolTip = "Hearthglass · \(habitat.title)"
 
     let menu = NSMenu()
     menu.delegate = self
@@ -562,7 +562,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     item.menu = menu
     status = item
     if item.button?.window == nil || !item.isVisible {
-      NSLog("desktop-habitats: the menu bar item did not appear")
+      NSLog("hearthglass: the menu bar item did not appear")
     }
   }
 
@@ -607,7 +607,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     else { return }
     habitat = chosen
     Habitat.selected = chosen
-    status?.button?.toolTip = "Desktop Habitats · \(chosen.title)"
+    status?.button?.toolTip = "Hearthglass · \(chosen.title)"
     build()
   }
 

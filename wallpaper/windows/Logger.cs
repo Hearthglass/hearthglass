@@ -1,11 +1,11 @@
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 public static class Logger
 {
     private static readonly string LogDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DesktopHabitats");
-    private static readonly string LogFile = Path.Combine(LogDir, "desktop-habitats.log");
+        "Hearthglass");
+    private static readonly string LogFile = Path.Combine(LogDir, "hearthglass.log");
     private static readonly object LockObj = new();
 
     static Logger()

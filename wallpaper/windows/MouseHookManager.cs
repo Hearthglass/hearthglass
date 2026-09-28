@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 public class MouseHookManager : IDisposable
 {
@@ -84,7 +84,7 @@ public class MouseHookManager : IDisposable
         })
         {
             IsBackground = true,
-            Name = "DesktopHabitats mouse hook"
+            Name = "Hearthglass mouse hook"
         };
         _hookThread.Start();
         ready.Wait();

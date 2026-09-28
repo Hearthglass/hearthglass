@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 internal static class NativeMethods
 {

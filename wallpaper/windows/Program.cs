@@ -1,15 +1,15 @@
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 internal static class Program
 {
-    private const string MutexName = "DesktopHabitats_SingleInstance_Mutex_2026";
+    private const string MutexName = "Hearthglass_SingleInstance_Mutex_2026";
     // Set by a second launch (the desktop icon clicked while running); the running copy waits on it.
-    public const string ActivateEventName = "DesktopHabitats_Activate_2026";
+    public const string ActivateEventName = "Hearthglass_Activate_2026";
 
     [STAThread]
     private static void Main()
     {
-        Logger.Info("[Program] Desktop Habitats starting...");
+        Logger.Info("[Program] Hearthglass starting...");
         using var mutex = new Mutex(true, MutexName, out bool isOnlyInstance);
         if (!isOnlyInstance)
         {
@@ -34,8 +34,8 @@ internal static class Program
         {
             Logger.Error($"[Program] Unhandled exception: {ex.Message}\n{ex.StackTrace}");
             MessageBox.Show(
-                $"An unexpected error occurred in Desktop Habitats:\n\n{ex.Message}\n{ex.StackTrace}",
-                "Desktop Habitats Error",
+                $"An unexpected error occurred in Hearthglass:\n\n{ex.Message}\n{ex.StackTrace}",
+                "Hearthglass Error",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }

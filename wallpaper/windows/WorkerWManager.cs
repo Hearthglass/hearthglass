@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace DesktopHabitats;
+namespace Hearthglass;
 
 // Places wallpaper windows between the desktop picture and the desktop icons.
 //
