@@ -1,6 +1,6 @@
 # Pushing a version tag (git tag v1.2.0 && git push origin v1.2.0) builds the Windows
 # zip and publishes a GitHub Release with it attached and notes generated from the
-# commits and pull requests since the previous tag.
+# commits and pull requests since the previous tag. Beta tags publish pre-releases.
 name: Release
 
 on:
@@ -24,7 +24,14 @@ jobs:
         shell: pwsh
         run: ./tools/package-windows.ps1
 
+      # A tag with a suffix (v1.2.0-beta.1, v1.2.0-rc.1) becomes a pre-release: marked not
+      # ready, never shown as the latest release, so the README's download link skips it.
       - name: Publish the release
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/Hearthglass-win-x64.zip --verify-tag --generate-notes --title "Hearthglass ${{ github.ref_name }}"
+          TAG: ${{ github.ref_name }}
+        run: |
+          $flags = @()
+          if ($env:TAG -like "*-*") { $flags += "--prerelease" }
+          gh release create $env:TAG dist/Hearthglass-win-x64.zip --verify-tag --generate-notes --title "Hearthglass $env:TAG" @flags
