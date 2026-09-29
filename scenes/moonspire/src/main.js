@@ -40,6 +40,7 @@ runPixelScene(({ params }) => {
   const rings = Array.from({ length: 6 }, () => ({ alive: false, x: 0, y: 0, r: 0, speed: 0, life: 0, age: 0 }));
   const timers = Array.from({ length: 64 }, () => ({ alive: false, t: 0, x: 0, y: 0, power: 0, kind: '' }));
   const hat = { off: false, state: 'flying', x: 0, y: 0, vx: 0, vy: 0, angle: 0, spin: 0, t: 0 };
+  const blast = { alive: false, x: 0, y: 0, age: 0, rays: [] };
   let flash = 0, shake = 0, shakeX = 0, shakeY = 0, idle = 0, nextIdea = 14, sinceMended = 99;
   // The dock's extras: a meteor shower, and the weather over the tower.
   const meteors = Array.from({ length: 12 }, () => ({ alive: false, x: 0, y: 0, vx: 0, vy: 0, age: 0, life: 0, len: 0 }));
@@ -167,12 +168,32 @@ runPixelScene(({ params }) => {
   function explode() {
     flash = 1;
     shake = 1;
-    addRing(moon.x, moon.y, 170, 0.9);
-    addRing(moon.x, moon.y, 95, 1.1);
+    const r = moon.r / K;
+    // the flash blooms into a lens-flare star with rays, and three shockwaves race out
+    Object.assign(blast, { alive: true, x: moon.x, y: moon.y, age: 0 });
+    blast.rays = Array.from({ length: 22 }, (_, i) => ({ a: (i / 22) * Math.PI * 2 + (random() - 0.5) * 0.22, len: 0.3 + random() * 0.7, thick: random() < 0.3 }));
+    addRing(moon.x, moon.y, 200, 0.95);
+    addRing(moon.x, moon.y, 125, 1.2);
+    addRing(moon.x, moon.y, 62, 0.75);
     burst(moon.x, moon.y, 220, 110, 'dust', 2.6, 8, 0.9, 0, 1.2);
     burst(moon.x, moon.y, 120, 150, 'white', 1.2, 10, 1.4, 1);
     burst(moon.x, moon.y, 60, 90, 'gold', 1.6, 12, 1.2, 2);
-    addGlow(moon.x, moon.y, moon.r / K * 5, 1, 0.9, LIGHT.flash);
+    burst(moon.x, moon.y, 70, 130, 'cyan', 1.1, 6, 1.6, 2);
+    // moon rock: a spray of fine grit and a few coarser flecks, in the moon's own colours
+    for (let i = 0, n = Math.round(150 * density); i < n; i++) {
+      const a = random() * Math.PI * 2, d = Math.sqrt(random()) * r * 0.9, s0 = 18 + Math.pow(random(), 0.6) * 120;
+      spawn(moon.x + Math.cos(a) * d * K, moon.y + Math.sin(a) * d * K, Math.cos(a) * s0, Math.sin(a) * s0 - 8, 2 + random() * 2.6, ramp.rock, 16, 0.7, random() < 0.3 ? 3 : 0);
+    }
+    // and a slow cloud of dust that hangs where it stood
+    for (let i = 0, n = Math.round(60 * density); i < n; i++) {
+      const a = random() * Math.PI * 2, s0 = 6 + random() * 26;
+      spawn(moon.x, moon.y, Math.cos(a) * s0, Math.sin(a) * s0, 3 + random() * 3, ramp.smoke, -1.5, 0.9, 3, 1 + (random() < 0.3 ? 1 : 0));
+    }
+    addGlow(moon.x, moon.y, r * 5, 1, 0.9, LIGHT.flash);
+    addGlow(moon.x, moon.y, r * 7.5, 1, 0.32, LIGHT.gem);
+    addGlow(moon.x, moon.y, r * 10, 0.8, 0.22, LIGHT.moonHalo);
+    // fragments crack and pop as they fly
+    for (let i = 0; i < 10; i++) later(0.22 + i * 0.17 + random() * 0.12, 'pop', 0, 0, 0.5 + random() * 0.5);
     // a few pieces fall as shooting stars
     for (let i = 0; i < 8; i++) {
       const a = Math.PI * (0.15 + random() * 0.7);
@@ -447,7 +468,15 @@ runPixelScene(({ params }) => {
           burst(tm.x, tm.y, 6, 18, 'white', 0.35, 5, 3, 2);
           addGlow(tm.x, tm.y, 6, 0.7, 4, LIGHT.gold);
         } else if (tm.kind === 'volley') launchBolt(tm.x, tm.y, tm.power, random() < 0.5 ? 'cyan' : 'violet');
-        else if (tm.kind === 'meteor') launchMeteor();
+        else if (tm.kind === 'pop') {
+          const ch = moon.chunks[Math.floor(random() * moon.chunks.length)];
+          if (ch && moon.state === 'shattered') {
+            burst(ch.x, ch.y, 10 + Math.round(tm.power * 10), 26 + tm.power * 24, random() < 0.5 ? 'white' : 'cyan', 0.5, 6, 2.5, 2);
+            burst(ch.x, ch.y, 6, 20, 'gold', 0.6, 10, 2, 0);
+            addGlow(ch.x, ch.y, 5 + tm.power * 6, 0.8, 4, LIGHT.gem);
+            shake = Math.max(shake, 0.06);
+          }
+        } else if (tm.kind === 'meteor') launchMeteor();
         else if (tm.kind === 'bats') backdrop.launchBats();
       }
       for (const m of meteors) {
@@ -460,6 +489,17 @@ runPixelScene(({ params }) => {
       updateWeather(dt);
       // moon
       const mended = moonCtl.update(dt);
+      if (blast.alive && (blast.age += dt) > 2.4) blast.alive = false;
+      if (moon.state === 'shattered') {
+        // hot pieces shed sparks and grit as they tumble
+        for (const ch of moon.chunks) {
+          if (ch.heat < 0.08) continue;
+          if (random() < dt * (8 + ch.heat * 34) * density) {
+            spawn(ch.x + (random() - 0.5) * ch.reach, ch.y + (random() - 0.5) * ch.reach, ch.vx / K * 0.15 + (random() - 0.5) * 8, ch.vy / K * 0.15 + (random() - 0.5) * 8, 0.35 + random() * 0.6, ramp[random() < 0.45 ? 'white' : 'cyan'], 4, 1.5, random() < 0.3 ? 2 : 0);
+          }
+          if (ch.heat > 0.3 && random() < dt * 9 * density) spawn(ch.x, ch.y, ch.vx / K * 0.05, ch.vy / K * 0.05, 1 + random(), ramp.dust, -1, 1.1, 3, 1);
+        }
+      }
       if (moon.state === 'shattered' && moon.sinceShatter > 4.8 && wizard.state !== 'shock') beginMend();
       if (moon.state === 'mending') {
         const g2 = gemWorld();
@@ -553,6 +593,7 @@ runPixelScene(({ params }) => {
       const fire = tower.fireIntensity(time);
       const layer = wiz.draw(time, {
         moon: moon.state === 'intact' ? 1 : 0, moonDX: moon.x - f.x, moonDY: moon.y - f.y,
+        blast: blast.alive ? clamp(1 - blast.age / 1.1, 0, 1) : 0,
         fire: clamp((fire - 0.35) * 0.9, 0, 0.8), fireDX: tower.brazier.x - f.x, fireDY: tower.brazier.y - 14 * K - f.y,
       });
       s.blit(layer, f.x - wiz.origin.x, f.y - wiz.origin.y);
@@ -576,7 +617,9 @@ runPixelScene(({ params }) => {
       const k = Math.max(wizard.charge, wizard.state === 'mend' ? 0.75 : 0.15 + Math.sin(time * 2.4) * 0.05);
       s.glow(g.x, g.y, (8 + k * 22) * K, wizard.glowColor === 'green' ? LIGHT.mend : wizard.glowColor === 'violet' ? LIGHT.violet : k > 0.75 ? LIGHT.gemHot : LIGHT.gem, 0.55 + k * 0.6);
       for (const p of projectiles) if (p.alive) s.glow(p.x, p.y, (7 + p.power * 12) * K, p.color === 'cyan' ? LIGHT.gem : LIGHT.violet, 0.9);
+      for (const ch of moon.chunks) if (moon.state !== 'intact' && ch.heat > 0.25) s.glow(ch.x, ch.y, ch.reach * 1.3 + 2 * U, LIGHT.gem, ch.heat * 0.22);
       for (const gl of glows) if (gl.alive) s.glow(gl.x, gl.y, gl.r, gl.luts, gl.strength);
+      if (blast.alive) drawBlast(s);
       if (charge.active && charge.amount >= 1) drawArcs(s, g.x, g.y, time);
       for (const r of rings) if (r.alive) drawShock(s, r);
       if (flash > 0) mapAll(s, LIGHT.flash, flash * flash * 0.7);
@@ -747,14 +790,54 @@ runPixelScene(({ params }) => {
     }
   }
 
+  /** The moment of the blast: a white core, a four-point star, diagonal flares and thin rays. */
+  function drawBlast(s) {
+    const t = blast.age, flare = LIGHT.flash;
+    const grow = 1 - (1 - clamp(t / 0.2, 0, 1)) ** 3;
+    const fade = clamp(1 - t / 1.1, 0, 1);
+    const reach = layout.W * 0.3 * grow * (0.35 + fade * 0.65);
+    const core = clamp(1 - t / 0.4, 0, 1);
+    if (core > 0) {
+      s.disc(blast.x, blast.y, moon.r * (0.3 + core * 1.1), c('star4'));
+      s.disc(blast.x, blast.y, moon.r * core * 0.6, c('star4'));
+    }
+    if (fade <= 0) return;
+    const lit = (x, y, level, luts) => {
+      let k = Math.floor(level);
+      if (level - k > bayer(x, y)) k++;
+      if (k > 0) s.pmap(x, y, luts[Math.min(luts.length, k) - 1]);
+    };
+    // the star: two long spikes and two short ones, plus diagonals, tapering to nothing
+    for (const [dx, dy, len] of [[1, 0, 1], [-1, 0, 1], [0, 1, 0.55], [0, -1, 0.55], [0.707, 0.707, 0.34], [-0.707, 0.707, 0.34], [0.707, -0.707, 0.34], [-0.707, -0.707, 0.34]]) {
+      const L = reach * len, halfW = (dx && dy ? 0.7 : 1.4) * U;
+      for (let i = 0; i < L; i++) {
+        const q = 1 - i / L, x = blast.x + dx * i, y = blast.y + dy * i;
+        const w = Math.round(halfW * q * q * (2 + fade));
+        for (let o = -w; o <= w; o++) lit(Math.round(x - dy * o), Math.round(y + dx * o), q * q * 4 * fade * (1 - Math.abs(o) / (w + 1) * 0.6), flare);
+      }
+    }
+    // thin rays fanning out from the core
+    for (const ray of blast.rays) {
+      const L = moon.r * (2 + ray.len * 9) * grow, cos = Math.cos(ray.a), sin = Math.sin(ray.a);
+      for (let i = moon.r * 0.6; i < L; i++) {
+        const q = 1 - i / L, x = Math.round(blast.x + cos * i), y = Math.round(blast.y + sin * i);
+        lit(x, y, q * 2.6 * fade * fade, flare);
+        if (ray.thick) lit(x + 1, y, q * 1.4 * fade * fade, LIGHT.gem);
+      }
+    }
+  }
+
   function drawShock(s, r) {
     const fade = 1 - r.age / r.life;
-    const steps = Math.max(12, Math.round(r.r * 6.5));
+    const steps = Math.max(12, Math.round(r.r * 7));
+    const thick = Math.max(1, Math.round(fade * 1.6 * U));
     for (let n = 0; n < steps; n++) {
-      const a = (n / steps) * Math.PI * 2;
-      const x = r.x + Math.cos(a) * r.r, y = r.y + Math.sin(a) * r.r;
-      s.pmap(x, y, fade > 0.5 ? LIGHT.flash[2] : LIGHT.flash[1]);
-      if (fade > 0.35) for (let w = 1; w <= U; w++) s.pmap(x - Math.cos(a) * w, y - Math.sin(a) * w, LIGHT.flash[0]);
+      const a = (n / steps) * Math.PI * 2, cos = Math.cos(a), sin = Math.sin(a);
+      const x = r.x + cos * r.r, y = r.y + sin * r.r;
+      s.pmap(x, y, fade > 0.5 ? LIGHT.flash[3] : LIGHT.flash[1]);
+      // a trailing wake behind the front, thinning out, and a cool fringe ahead of it
+      for (let w = 1; w <= thick * 2; w++) if (w <= thick || bayer(n, w) < fade) s.pmap(x - cos * w, y - sin * w, w <= thick ? LIGHT.flash[2] : LIGHT.flash[0]);
+      if (fade > 0.3) s.pmap(x + cos, y + sin, LIGHT.gem[fade > 0.6 ? 2 : 0]);
     }
   }
 

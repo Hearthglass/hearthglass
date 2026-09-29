@@ -4,6 +4,8 @@ import { palette } from './palette.js';
 const c = name => palette.c(name);
 const MOON = palette.ramp('moon');
 export const MOON_HP = 100;
+// A freshly broken edge glows white, then magic cyan, then cools back to rock.
+const EDGE = ['star4', 'cyan5', 'cyan4', 'cyan3', 'cyan2', 'cyan1'];
 
 /**
  * The moon: a lit sphere with maria and craters that takes damage as cracks, bursts into
@@ -173,10 +175,27 @@ export function createMoon(random) {
       const al = Math.hypot(ax, ay) || 1;
       ax /= al; ay /= al;
       const speed = (18 + random() * 38) * (0.7 + power * 0.8) * (n < 12 ? 1.4 : 1);
+      // The piece as a small bitmap, so it can be turned by sampling backwards (no holes),
+      // plus a mask of its broken edge, which is what glows.
+      let x0 = 0, x1 = 0, y0 = 0, y1 = 0, reach = 0;
+      for (let q = 0; q < n; q++) {
+        const ox = offsets[q * 2], oy = offsets[q * 2 + 1];
+        x0 = Math.min(x0, ox); x1 = Math.max(x1, ox); y0 = Math.min(y0, oy); y1 = Math.max(y1, oy);
+        reach = Math.max(reach, Math.hypot(ox, oy));
+      }
+      const gw = x1 - x0 + 1, gh = y1 - y0 + 1;
+      const grid = new Uint8Array(gw * gh).fill(CLEAR), edge = new Uint8Array(gw * gh);
+      for (let q = 0; q < n; q++) grid[(offsets[q * 2 + 1] - y0) * gw + offsets[q * 2] - x0] = colors[q];
+      for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+        if (grid[gy * gw + gx] === CLEAR) continue;
+        const open = (dx, dy) => { const X = gx + dx, Y = gy + dy; return X < 0 || Y < 0 || X >= gw || Y >= gh || grid[Y * gw + X] === CLEAR; };
+        if (open(-1, 0) || open(1, 0) || open(0, -1) || open(0, 1)) edge[gy * gw + gx] = 1;
+      }
       moon.chunks.push({
         hx: mx, hy: my, x: moon.x + mx, y: moon.y + my,
         vx: ax * speed + (random() - 0.5) * 10, vy: ay * speed + (random() - 0.5) * 10 - 6,
         angle: 0, spin: (random() - 0.5) * 3.5, offsets, colors, heat: 1,
+        grid, edge, gw, gh, gx0: x0, gy0: y0, reach: Math.ceil(reach) + 1,
         startX: 0, startY: 0, startAngle: 0, delay: 0,
       });
     }
@@ -218,7 +237,7 @@ export function createMoon(random) {
         ch.x += ch.vx * dt; ch.y += ch.vy * dt;
         ch.angle += ch.spin * dt;
         ch.spin *= Math.exp(-dt * 0.2);
-        ch.heat = Math.max(0, ch.heat - dt * 0.8);
+        ch.heat = Math.max(0, ch.heat - dt * 0.42);
       }
     } else if (moon.state === 'mending') {
       moon.mendProgress += dt;
@@ -265,18 +284,34 @@ export function createMoon(random) {
       }
       return;
     }
+    const edgeColors = EDGE.map(c);
     for (const ch of moon.chunks) {
-      // rotation snaps to 16ths of a half turn so the pieces tumble in readable steps
-      const a = Math.round(ch.angle / (Math.PI / 16)) * (Math.PI / 16);
+      // rotation snaps to 32nds of a half turn so the pieces tumble in readable steps
+      const a = Math.round(ch.angle / (Math.PI / 32)) * (Math.PI / 32);
       const cos = Math.cos(a), sin = Math.sin(a);
-      const ox = Math.round(ch.x), oy = Math.round(ch.y);
-      const n = ch.colors.length;
-      for (let q = 0; q < n; q++) {
-        const dx = ch.offsets[q * 2], dy = ch.offsets[q * 2 + 1];
-        let color = ch.colors[q];
-        if (ch.heat > 0.5) color = palette.lighter[palette.lighter[color]];
-        else if (ch.heat > 0.15) color = palette.lighter[color];
-        surface.pset(ox + Math.round(dx * cos - dy * sin), oy + Math.round(dx * sin + dy * cos), color);
+      const ox = Math.round(ch.x), oy = Math.round(ch.y), R = ch.reach, { grid, edge, gw, gh, gx0, gy0 } = ch;
+      const heat = ch.heat;
+      const hot = heat > 0.05 ? edgeColors[Math.min(edgeColors.length - 1, Math.floor((1 - heat) * edgeColors.length))] : -1;
+      // sample the piece at a screen offset (turning backwards), -1 outside it
+      const at = (x, y) => {
+        const gx = Math.round(x * cos + y * sin) - gx0, gy = Math.round(y * cos - x * sin) - gy0;
+        if (gx < 0 || gy < 0 || gx >= gw || gy >= gh) return -1;
+        const i = gy * gw + gx;
+        return grid[i] === CLEAR ? -1 : i;
+      };
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+        const i = at(dx, dy);
+        if (i < 0) continue;
+        let color = grid[i];
+        if (hot >= 0 && edge[i]) color = hot;
+        else {
+          // bevel: lit toward the upper right, shaded toward the lower left, whichever way it has turned
+          if (at(dx + 1, dy - 1) < 0) color = palette.lighter[color];
+          else if (at(dx - 1, dy + 1) < 0) color = palette.darker[palette.darker[color]];
+          else if (at(dx - 2, dy + 2) < 0 && bayer(dx, dy) < 0.6) color = palette.darker[color];
+          if (heat > 0.85) color = palette.lighter[color];
+        }
+        surface.pset(ox + dx, oy + dy, color);
       }
     }
   }

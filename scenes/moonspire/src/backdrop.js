@@ -567,8 +567,8 @@ export function createBackdrop(random) {
       const len = 4 * u;
       for (let i = 0; i < len; i++) {
         const wave = Math.round(Math.sin(i * 0.9 / u - step * 1.3) * 0.6 * u);
-        surface.pset(f.x + i, f.y + wave, i < len / 2 ? c('robe4') : c('robe3'));
-        if (u > 1 && i < len - 2) surface.pset(f.x + i, f.y + wave + 1, c('robe2'));
+        surface.pset(f.x + i, f.y + wave, i < len / 2 ? c('cloak4') : c('cloak3'));
+        if (u > 1 && i < len - 2) surface.pset(f.x + i, f.y + wave + 1, c('cloak2'));
       }
     }
     // chimney smoke curls up and leans with the breeze

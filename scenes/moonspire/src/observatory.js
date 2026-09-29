@@ -579,7 +579,7 @@ export function createObservatory(random) {
   function drawBooksAndPotions() {
     const { groundY } = layout;
     // a stack of books, the candle on top
-    const specs = [[S(15), S(3.5), c('book1'), c('book3')], [S(13), S(3), c('robe2'), c('robe4')], [S(14), S(3.5), c('wood3'), c('wood5')], [S(11), S(3), c('violet1'), c('violet2')]];
+    const specs = [[S(15), S(3.5), c('book1'), c('book3')], [S(13), S(3), c('cloak2'), c('cloak4')], [S(14), S(3.5), c('wood3'), c('wood5')], [S(11), S(3), c('violet1'), c('violet2')]];
     let y = groundY;
     let x = books.x;
     for (const [w, h, dark, light] of specs) {
@@ -801,7 +801,7 @@ export function createObservatory(random) {
     const cx = orrery.x, cy = layout.groundY - S(33);
     const rings = [
       { rx: S(13), ry: S(4), speed: 0.7, planet: c('cyan3'), pr: 1.3, moon: true },
-      { rx: S(8), ry: S(2.6), speed: 1.6, planet: c('robe5'), pr: 1 },
+      { rx: S(8), ry: S(2.6), speed: 1.6, planet: c('cloak5'), pr: 1 },
     ];
     // back halves of the rings, then planets behind the sun, the sun, then the front
     const planet = (ring, front) => {

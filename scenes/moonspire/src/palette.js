@@ -2,7 +2,7 @@ import { createPalette } from '../../shared/pixel-engine.js';
 
 // Night at a wizard's observatory. Every ramp is hue-shifted, not just darkened: shadows
 // fall toward indigo and violet, lights climb toward cream and coral. The sky and stone
-// stay cool and quiet so the warm robe, the fire and the magic own the eye.
+// stay cool and quiet so the glowing teal robe, the fire and the magic own the eye.
 //
 // Ramps are interpolated in OKLab between a few hand-picked keys, dark to light.
 
@@ -61,7 +61,9 @@ export const palette = createPalette({
   warm: ramp(5, '#2e1f28', '#4b2c2e', '#703f33', '#9a5a3b', '#c7804b'),
   moss: ramp(5, '#0f2525', '#183a2e', '#27563a', '#437543', '#76a059'),
   verd: ramp(6, '#0e2229', '#15373a', '#1f5250', '#317266', '#539a82', '#8cc6a4'),
-  robe: ramp(8, '#1c0720', '#340b2d', '#521236', '#75173b', '#98203f', '#bb344a', '#dc5859', '#f5896f'),
+  // his suit is deep sea-glass teal; the crimson lives on in the cloak, the banners and the props
+  robe: ramp(8, '#04161c', '#082a34', '#0d4550', '#136570', '#1c8a88', '#2fb0a2', '#63d6bc', '#a4f0d2'),
+  cloak: ramp(8, '#1c0720', '#340b2d', '#521236', '#75173b', '#98203f', '#bb344a', '#dc5859', '#f5896f'),
   gold: ramp(6, '#35190d', '#683814', '#a1621d', '#d19a35', '#f0c95f', '#fff4b4'),
   brass: ramp(5, '#28200f', '#4f4220', '#857038', '#bba25a', '#eadb97'),
   skin: ramp(5, '#461f25', '#7a3c36', '#b06851', '#db9876', '#f7caa3'),
@@ -108,6 +110,7 @@ export const RIM = {
   gemHot: palette.add('#c8f6ff', 0.9),
   moon: palette.add('#b8b2e0', 0.22),
   fire: palette.add('#ff9a3a', 0.4),
+  blast: palette.add('#e4f4ff', 0.75),
 };
 export const SHADE = {
   dim: palette.scale(0.72, 0.72, 0.85),
@@ -126,6 +129,7 @@ export const RAMPS = {
   violet: [c('star4'), c('violet4'), c('violet3'), c('violet2'), c('violet1'), c('sky4')],
   fire: [c('fire6'), c('fire5'), c('fire4'), c('fire3'), c('fire2'), c('fire1'), c('stone1')],
   ember: [c('fire5'), c('fire4'), c('fire3'), c('fire2'), c('fire1')],
+  rock: [c('moon6'), c('moon5'), c('moon4'), c('moon3'), c('moon2'), c('moon1'), c('sky5')],
   gold: [c('star4'), c('gold5'), c('gold4'), c('gold3'), c('gold2'), c('gold1')],
   green: [c('star4'), c('green4'), c('green3'), c('green2'), c('green1')],
   pink: [c('star4'), c('pink4'), c('pink3'), c('pink2'), c('pink1')],

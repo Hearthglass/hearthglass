@@ -25,7 +25,7 @@ const FACE_ROWS = [
 ];
 // The fine face: long hair behind, a bushy brow, a bright eye, a big lit nose and a
 // moustache that spills into the beard.
-const FINE_KEY = { ...FACE_KEY, X: 'beard5', T: 'skin4', r: 'skin0', g: 'star4' };
+const FINE_KEY = { ...FACE_KEY, X: 'beard5', T: 'skin4', r: 'skin0', g: 'star4', o: 'gold3' };
 const FINE_ROWS = [
   '..vvvwwwwwwwkksssssss.....',
   '.vvwwwwwwwwwkssssssssss...',
@@ -53,6 +53,9 @@ const edit = (rows, changes) => rows.map((row, y) => {
   for (const [ry, x, text] of changes) if (ry === y) out = out.slice(0, x) + text + out.slice(x + text.length);
   return out;
 });
+// Round gold spectacles: a temple arm back to the ear, a ring of wire round the eye.
+const SPECS = [[6, 12, 'o'], [6, 13, 'o'], [7, 13, 'o'], [6, 17, 'o'], [7, 17, 'o'], [8, 14, 'ooo']];
+const SPECS_WIDE = [[5, 12, 'o'], [6, 12, 'o'], [7, 12, 'o'], [5, 17, 'o'], [6, 17, 'o'], [7, 17, 'o'], [8, 13, 'oooo']];
 const FACES = {
   1: {
     still: sprite(palette, FACE_KEY, FACE_ROWS),
@@ -61,10 +64,10 @@ const FACES = {
     wide: sprite(palette, FACE_KEY, edit(FACE_ROWS, [[2, 6, 'WWWW'], [3, 6, 'ee']])),
   },
   2: {
-    still: sprite(palette, FINE_KEY, FINE_ROWS),
-    blink: sprite(palette, { ...FINE_KEY, e: 'skin1', g: 'skin1' }, edit(FINE_ROWS, [[7, 13, 'kkk']])),
-    glow: sprite(palette, { ...FINE_KEY, e: 'cyan5', g: 'star4' }, FINE_ROWS),
-    wide: sprite(palette, FINE_KEY, edit(FINE_ROWS, [[3, 12, 'WWHHWW'], [4, 12, 'kWWWWWW'], [5, 12, 'ksesgs'], [6, 12, 'keeees'], [7, 12, 'ksees']])),
+    still: sprite(palette, FINE_KEY, edit(FINE_ROWS, SPECS)),
+    blink: sprite(palette, { ...FINE_KEY, e: 'skin1', g: 'skin1' }, edit(edit(FINE_ROWS, [[7, 13, 'kkk']]), SPECS)),
+    glow: sprite(palette, { ...FINE_KEY, e: 'cyan5', g: 'star4' }, edit(FINE_ROWS, SPECS)),
+    wide: sprite(palette, FINE_KEY, edit(edit(FINE_ROWS, [[3, 12, 'WWHHWW'], [4, 12, 'kWWWWWW'], [5, 12, 'ksesgs'], [6, 12, 'keeees'], [7, 12, 'ksees']]), SPECS_WIDE)),
   },
 };
 
@@ -104,6 +107,7 @@ function makePose() {
 /** Draw the pointed hat with its brim centred at (bx, by). Works in the layer and loose in the scene. */
 const HAT_MAX = 64;
 const hatSpine = new Float32Array(HAT_MAX * 5); // x, y, angle, width, distance
+const HAT_MOON = ['.xx.', 'xx..', 'x...', 'xx..', '.xx.'];
 const HAT_STARS = [[5, -0.25, 1], [8.5, 0.3, 0], [12, -0.3, 0], [15.5, 0.15, 0], [10.2, -0.55, 0]];
 
 export function drawHat(s, bx, by, tilt, bend, clipBelow = by - 1, U = 1) {
@@ -161,6 +165,16 @@ export function drawHat(s, bx, by, tilt, bend, clipBelow = by - 1, U = 1) {
     const sx = hatSpine[i] + Math.cos(hatSpine[i + 2]) * hatSpine[i + 3] * u, sy = hatSpine[i + 1] + Math.sin(hatSpine[i + 2]) * hatSpine[i + 3] * u;
     s.pset(sx, sy, c('gold5'));
     if (big) for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) s.pset(sx + ox, sy + oy, c('gold3'));
+  }
+  if (U > 1) {
+    // a crescent-moon buckle on the band, on a dark plum plate so it reads against the gold
+    const i = Math.round((1.65 * U) / step) * 5;
+    const mx = Math.round(hatSpine[i] + Math.cos(hatSpine[i + 2]) * hatSpine[i + 3] * 0.2) - 1, my = Math.round(hatSpine[i + 1]) - 2;
+    for (let ry = -1; ry <= 5; ry++) for (let rx = -1; rx <= 4; rx++) {
+      if ((rx === -1 || rx === 4) && (ry === -1 || ry === 5)) continue;
+      const ch = HAT_MOON[ry]?.[rx];
+      s.pset(mx + rx, my + ry, ch === 'x' ? c(rx === 0 ? 'gold4' : 'gold5') : c('robe1'));
+    }
   }
   s.pset(hatSpine[last], hatSpine[last + 1], c('gold4'));
   if (U > 1) s.pset(hatSpine[last] + 1, hatSpine[last + 1], c('gold2'));
@@ -425,6 +439,42 @@ export function createWizard() {
     }
   }
 
+  /** A crimson cape lined in gold, hung from the shoulders behind him and swinging with the robe. */
+  function drawCape(s, p) {
+    const bob = (p.bob + p.crouch) * U, L = Math.round(p.lean * U), sway = p.sway * U;
+    const top = Math.round(OY - 29 * U + bob), bottom = Math.round(OY - 2 * U), len = bottom - top;
+    const trim = U > 1 ? 2 : 1;
+    const leftAt = t => OX + (-6 - 11.5 * Math.pow(t, 1.1)) * U + L * (1 - t) + sway * t * 1.1 + p.beard * t * 0.8 * U + Math.sin(t * 6 + p.beard * 0.6) * 0.6 * U * t;
+    const right = OX + 3 * U;
+    // the hem rises toward the outer edge, as if the cloth were caught by the wind
+    const hemAt = u => bottom - Math.round((1 - u) * 4 * U);
+    for (let y = top; y <= bottom; y++) {
+      const t = (y - top) / len, left = leftAt(t), span = Math.max(1, right - left);
+      const fold = 0.32 + Math.sin(t * 5 + p.beard * 0.4) * 0.05;
+      for (let x = Math.round(left); x <= right; x++) {
+        const u = (x - left) / span, hem = hemAt(u);
+        if (y > hem) continue;
+        const dither = U > 1 ? bayer(x, y) : ((x + y) & 1 ? 0.8 : 0.2);
+        let v = u < 0.12 ? 4.2 : u < 0.45 ? 3.2 - (u - 0.12) * 1.8 : 2.2;
+        if (Math.abs(u - fold) < 0.5 / span + 0.015 && t > 0.15) v = 1.2;
+        let color = c(`cloak${clamp(Math.floor(v + 0.5 + (dither - 0.5) * 0.9), 1, 6)}`);
+        if (y > hem - trim) color = y === hem ? c('gold2') : c('gold3');
+        else if (y === hem - trim && U > 1) color = c('gold1');
+        s.pset(x, y, color);
+      }
+    }
+    if (U > 1) {
+      // a few gold stars stitched into the lining
+      for (const [ut, tt] of [[0.3, 0.3], [0.16, 0.5], [0.4, 0.62], [0.24, 0.75]]) {
+        const y = Math.round(top + len * tt), left = leftAt(tt);
+        if (y > hemAt(ut) - 3) continue;
+        const x = Math.round(left + (right - left) * ut);
+        s.pset(x, y, c('gold4'));
+        s.pset(x + 1, y, c('gold2')); s.pset(x - 1, y, c('gold2')); s.pset(x, y + 1, c('gold2')); s.pset(x, y - 1, c('gold2'));
+      }
+    }
+  }
+
   function drawBody(s, p) {
     const bob = (p.bob + p.crouch) * U, L = Math.round(p.lean * U), sway = p.sway * U;
     const sy = -29 * U + bob;
@@ -453,7 +503,7 @@ export function createWizard() {
         const dither = U > 1 ? bayer(x, y) : ((x + y) & 1 ? 0.8 : 0.2);
         let v = u < 0.14 ? 1.6 : u < 0.4 ? 2.6 + (u - 0.14) * 3 : u > 0.9 ? 5.2 : 4;
         if (U > 1 && u > 0.72 && u <= 0.9) v = 4.4;
-        let color = c(`robe${clamp(Math.floor(v + dither - 0.5), 1, 6)}`);
+        let color = c(`robe${clamp(Math.floor(v + 0.5 + (dither - 0.5) * 0.9), 1, 6)}`);
         // folds swing with the hem
         if (below > 0.1) {
           if (Math.abs(u - fold1) < 0.5 / span + 0.02 && (U > 1 || y % 3 !== 0)) color = c('robe2');
@@ -542,10 +592,12 @@ export function createWizard() {
   function drawBeard(s, p) {
     const bob = (p.bob + p.crouch) * U;
     const top = OY - 30 * U + bob, len = 15 * U;
-    for (let yy = 0; yy <= len; yy++) {
+    const at = yy => {
       const t = yy / len;
-      const half = (4.6 * Math.pow(1 - t, 0.75) + 0.4) * U;
-      const cx = OX + (1.5 + p.lean * 0.8 + p.beard * t * t + Math.sin(yy / U * 0.7) * 0.35 + t * 0.8) * U;
+      return { half: (4.6 * Math.pow(1 - t, 0.75) + 0.4) * U, cx: OX + (1.5 + p.lean * 0.8 + p.beard * t * t + Math.sin(yy / U * 0.7) * 0.35 + t * 0.8) * U };
+    };
+    for (let yy = 0; yy <= len; yy++) {
+      const { half, cx } = at(yy);
       const y = Math.round(top + yy);
       for (let x = Math.round(cx - half); x <= Math.round(cx + half); x++) {
         const u = (x - (cx - half)) / (2 * half);
@@ -568,6 +620,16 @@ export function createWizard() {
         s.pset(x, y, color);
       }
     }
+    // a gold ring binds the beard, with a little gem bead hanging from it
+    const ry = Math.round(len * 0.6), { half, cx } = at(ry), y = Math.round(top + ry);
+    for (let x = Math.round(cx - half); x <= Math.round(cx + half); x++) {
+      const lit = x > cx + half * 0.3;
+      s.pset(x, y, lit ? c('gold5') : c('gold4'));
+      if (U > 1) s.pset(x, y + 1, lit ? c('gold3') : c('gold2'));
+    }
+    const bx = Math.round(cx + half * 0.15), by = y + (U > 1 ? 2 : 1);
+    s.pset(bx, by, c('cyan4'));
+    if (U > 1) { s.pset(bx, by + 1, c('cyan3')); s.pset(bx, by + 2, c('cyan5')); s.pset(bx + 1, by + 1, c('cyan2')); s.pset(bx - 1, by + 1, c('cyan4')); }
   }
 
   /**
@@ -580,14 +642,15 @@ export function createWizard() {
     // something about his look changes, not every frame.
     const resampled = sample(time);
     const look = `${wizard.state}|${wizard.blinking > 0}|${wizard.eyesGlow > 0.3}|${wizard.glowColor}|${wizard.hatOn}|` +
-      `${Math.round(wizard.charge * 12)}|${Math.round(wizard.soot * 16)}|${lights.moon}|${layer.w}|${lights.moonDX}|${lights.moonDY}`;
+      `${Math.round(wizard.charge * 12)}|${Math.round((lights.blast || 0) * 8)}|${Math.round(wizard.soot * 16)}|${lights.moon}|${layer.w}|${lights.moonDX}|${lights.moonDY}`;
     if (!resampled && look === drawnLook) return layer;
     drawnLook = look;
     const p = shown;
     layer.clear(CLEAR);
     const bob = (p.bob + p.crouch) * U, L = Math.round(p.lean * U);
     const glow = Math.max(wizard.charge, wizard.state === 'mend' ? 0.7 : 0, wizard.state === 'cast' ? 0.5 : 0);
-    // far arm first, behind everything
+    // the cape hangs behind everything, then the far arm
+    drawCape(layer, p);
     drawArm(layer, OX - 4 * U + L, OY - 27 * U + bob, OX + p.backX * U + L, OY + p.backY * U + bob, false);
     drawBody(layer, p);
     // head
@@ -611,6 +674,7 @@ export function createWizard() {
     layer.outline(INK);
     // Light: a cool edge from the moon, warm from the fire, and the gem on top.
     if (lights.moon > 0) layer.rim(OX + lights.moonDX, OY + lights.moonDY, RIM.moon, lights.moon);
+    if (lights.blast > 0) layer.rim(OX + lights.moonDX, OY + lights.moonDY, RIM.blast, lights.blast, 2);
     if (lights.fire > 0) layer.rim(OX + lights.fireDX, OY + lights.fireDY, RIM.fire, lights.fire);
     const gemRim = 0.3 + glow * 0.9;
     layer.rim(gx, gy, glow > 0.6 ? RIM.gemHot : RIM.gem, Math.min(1, gemRim), (glow > 0.6 ? 2 : 1) * U);
